@@ -131,6 +131,29 @@ void uart_printf(const char *fmt, ...)
         }
         fmt++;
 
+        /* %-Ns — string left-aligned in a field of N (single digit).
+         * Only reason it exists: keeping the process-name column in
+         * the boot log and `ps` listing straight. */
+        if (fmt[0] == '-' && fmt[1] >= '1' && fmt[1] <= '9'
+            && fmt[2] == 's') {
+            const char *s = va_arg(ap, const char *);
+            uint32_t    w = (uint32_t)(fmt[1] - '0');
+            uint32_t    l = 0;
+
+            if (!s)
+                s = "(null)";
+            while (s[l]) {
+                uart_putc(s[l]);
+                l++;
+            }
+            while (l < w) {
+                uart_putc(' ');
+                l++;
+            }
+            fmt += 3;
+            continue;
+        }
+
         if (fmt[0] == '0' && fmt[1] == '8' && fmt[2] == 'x') {
             uval = va_arg(ap, uint32_t);
             for (i = 28; i >= 0; i -= 4)

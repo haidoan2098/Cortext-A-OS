@@ -107,15 +107,33 @@ static int fault_from_user(const exception_context_t *ctx)
 static void user_fault_kill(const char *kind)
 {
     if (current) {
-        uart_printf("[KILL] pid=%u name=%s killed by %s\n",
-                    current->pid, current->name, kind);
-        current->state = TASK_DEAD;
+        process_t *p = current->proc;
+
+        /* Retire the WHOLE process, not just the faulting thread —
+         * POSIX SIGSEGV semantics, and for a concrete reason: the
+         * fault proves this address space is being used wrongly,
+         * and every sibling thread shares that exact address space.
+         * A thread that scribbled over a neighbour's stack before
+         * finally touching an unmapped page has already corrupted
+         * state the siblings depend on.
+         *
+         * Leaving siblings alive also produces a zombie: kill only
+         * the shell's reader thread and its worker thread keeps
+         * printing a prompt that nothing will ever service. */
+        uart_printf("[KILL] %s killed by %s "
+                    "(faulting t%u, whole process retired)\n",
+                    p->name, kind, current->index);
+
+        for (uint32_t i = 0; i < THREADS_PER_PROC; i++) {
+            if (p->threads[i])
+                p->threads[i]->state = TASK_DEAD;
+        }
     }
     scheduler_request_resched();
     schedule();
 
-    /* Fall through only if no other runnable process remains. */
-    uart_printf("[PANIC] no runnable process left after user fault\n");
+    /* Fall through only if no other runnable thread remains. */
+    uart_printf("[PANIC] no runnable thread left after user fault\n");
     halt_forever();
 }
 
@@ -184,7 +202,7 @@ void handle_undefined(exception_context_t *ctx)
  *
  * Convention: r7 holds the syscall number, r0..r3 the arguments,
  * r0 receives the return value. We ignore the svc #N immediate
- * itself (always 0 in RingNova user code).
+ * itself (always 0 in Cortex-A-OS user code).
  *
  * After dispatch we call schedule() so that sys_yield / sys_exit
  * can swap context before returning to user mode.

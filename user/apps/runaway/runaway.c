@@ -31,8 +31,7 @@ static void spin_forever(void)
 
 int main(void)
 {
-    ulib_tag_tid(0);
-    ulib_puts("runaway thread started — silent, no sys_yield\n");
+    ulib_printf("[runaway t0] spinning — never calls sys_yield\n");
 
     spin_forever();
 
@@ -41,8 +40,7 @@ int main(void)
 
 void thread_main(unsigned int idx)
 {
-    ulib_tag_tid(idx);
-    ulib_puts("runaway thread started — silent, no sys_yield\n");
+    ulib_printf("[runaway t%u] spinning — never calls sys_yield\n", idx);
 
     spin_forever();
 }

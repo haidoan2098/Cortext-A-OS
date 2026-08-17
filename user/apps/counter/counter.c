@@ -37,14 +37,14 @@ int main(void)
         unsigned int mark;                             /* stack probe */
         prev = now;
 
-        ulib_tag_tid(0);
-        ulib_puts("count=");
-        ulib_putu(shared_count++);
-        ulib_puts("  dt=");
-        ulib_putu(dt * 10U);                           /* ms */
-        ulib_puts("ms  &mark=0x");
-        ulib_putx((unsigned int)&mark);
-        ulib_putc('\n');
+        /* One printf = one sys_write = one untearable line, even
+         * with the sibling thread printing concurrently.
+         *
+         * The prefix is a literal: this program knows its own name,
+         * so there is no reason to spend a sys_getpid on every line
+         * and no name-width guessing at runtime. */
+        ulib_printf("[counter t0] writes count=%u  dt=%ums  &mark=%p\n",
+                    shared_count++, dt * 10U, (void *)&mark);
 
         ulib_delay_ticks(DELAY_TICKS);
     }
@@ -61,12 +61,9 @@ void thread_main(unsigned int idx)
     for (;;) {
         unsigned int mark;                             /* stack probe */
 
-        ulib_tag_tid(idx);
-        ulib_puts("observes count=");
-        ulib_putu(shared_count);
-        ulib_puts("  &mark=0x");
-        ulib_putx((unsigned int)&mark);
-        ulib_putc('\n');
+        ulib_printf("[counter t%u] reads  count=%u"
+                    "             &mark=%p\n",
+                    idx, shared_count, (void *)&mark);
 
         ulib_delay_ticks(WATCH_TICKS);
     }

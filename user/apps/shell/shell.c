@@ -157,13 +157,17 @@ int main(void)
  * Second thread of the shell process — prints a heartbeat when it
  * gets the CPU.
  *
- * It must NOT call sys_read: the kernel's wait slot for UART input
- * (scheduler.c: blocked_reader) holds exactly one thread, so a
- * second reader would overwrite the first and leave it BLOCKED
- * forever. Printing only is safe.
+ * It could call sys_read now — the kernel keeps a FIFO wait queue,
+ * so several threads may block on input safely. It deliberately
+ * does not: two readers on one keyboard split every line between
+ * two private line buffers, so no command ever parses. That is a
+ * UX problem, not a kernel one.
  *
  * The delay is what keeps the prompt usable — a heartbeat on every
  * 10 ms time slice would print ~100 lines/second and bury it.
+ *
+ * Each message is a single ulib_printf, i.e. a single sys_write,
+ * so it cannot be torn apart by the reader thread echoing a key.
  * --------------------------------------------------------------- */
 #define HEARTBEAT_TICKS  500U   /* 500 × 10 ms = 5 s */
 
@@ -172,9 +176,8 @@ void thread_main(unsigned int idx)
     for (;;) {
         ulib_delay_ticks(HEARTBEAT_TICKS);
 
-        ulib_puts("\r\n");
-        ulib_tag_tid(idx);
-        ulib_puts("heartbeat — shell worker thread alive\r\n");
-        prompt();
+        /* Newline, message and a fresh prompt in ONE write, so the
+         * line can't be split by the reader thread echoing a key. */
+        ulib_printf("\r\n[shell   t%u] heartbeat\r\nshell> ", idx);
     }
 }

@@ -1,5 +1,5 @@
-#ifndef RINGNOVA_ULIB_H
-#define RINGNOVA_ULIB_H
+#ifndef CORTEX_A_OS_ULIB_H
+#define CORTEX_A_OS_ULIB_H
 
 /* ===========================================================
  * user/libc/ulib.h — Minimal string/print helpers for user
@@ -9,6 +9,25 @@
  * =========================================================== */
 
 #include "syscall.h"
+
+/* ulib_printf — format one message into a local buffer and emit it
+ * with a SINGLE sys_write.
+ *
+ * That single call is what keeps output readable when several
+ * threads share the UART: a syscall runs with CPSR.I = 1, so it
+ * cannot be preempted, and one write therefore cannot be torn
+ * apart. Building a line out of many ulib_putc calls does get torn
+ * — one sys_write per character, and a sibling thread can land
+ * between any two of them.
+ *
+ * This is NOT a lock. Concurrent threads still interleave freely
+ * BETWEEN messages; the guarantee is only that each message
+ * arrives whole. Lines longer than the internal buffer are
+ * truncated rather than split.
+ *
+ * Conversions: %u %x %p %s %c %%
+ */
+void         ulib_printf(const char *fmt, ...);
 
 unsigned int ulib_strlen(const char *s);
 void         ulib_puts(const char *s);     /* write(1, s, strlen(s)) */
@@ -20,15 +39,15 @@ void         ulib_putc(char c);            /* single byte            */
  * yielding the CPU while waiting so siblings make progress. */
 void         ulib_delay_ticks(unsigned int ticks);
 
-/* Print "pid=N " prefix. Useful when multiple processes share
- * a terminal and you want to know which one spoke. */
-void         ulib_tag(void);
-
-/* Print "[pid N.I] " prefix — same idea, but distinguishes the
- * threads inside one process. No sys_gettid needed: crt0 hands
- * each thread its index as thread_main's argument, so the caller
- * already knows which one it is. */
-void         ulib_tag_tid(unsigned int idx);
+/* Log-line identity convention: every message starts with
+ * "[<program> t<index>] ", matching what the kernel's boot dump,
+ * `ps`, and the [KILL]/[EXIT] lines print. Programs write the
+ * prefix as a literal in their format string — a program knows
+ * its own name, so there is no runtime lookup and no name-width
+ * guessing. Pad the name to 7 columns to keep logs aligned.
+ *
+ * Example:  ulib_printf("[counter t0] writes count=%u\n", n);
+ */
 
 /* Entry point for every non-main thread of a process. crt0 calls
  * this with the thread's index (1, 2, ...) when the kernel starts
@@ -45,4 +64,4 @@ int          ulib_strcmp(const char *a, const char *b);
 int          ulib_strncmp(const char *a, const char *b, unsigned int n);
 int          ulib_atoi(const char *s);    /* stops at first non-digit */
 
-#endif /* RINGNOVA_ULIB_H */
+#endif /* CORTEX_A_OS_ULIB_H */
