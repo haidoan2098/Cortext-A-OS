@@ -178,7 +178,7 @@ ARMv7-A MMU supports 2 levels of page tables:
 - **L1 → L2 page** (4 KB): L1 entry points to a smaller L2 table (256 entries = 1 KB),
   each L2 entry maps 4 KB.
 
-RingNova chooses **section mapping (1 MB)** because:
+Cortex-A-OS chooses **section mapping (1 MB)** because:
 
 - 3 processes, each with 1 MB memory → 1 section descriptor per process
 - Kernel image < 1 MB currently → a few sections are enough
@@ -270,7 +270,7 @@ Each 32-bit entry in the L1 table:
                                               └── Type = Section
 ```
 
-Attributes used in RingNova:
+Attributes used in Cortex-A-OS:
 
 | Name | Value | Used for |
 |------|-------|----------|
@@ -291,7 +291,7 @@ Attributes used in RingNova:
 
 - **TTBR0** = physical address of the L1 table + walk attributes (cache policy for hardware
   table walk). TTBCR=0 → TTBR0 covers the full 4 GB.
-- **DACR** = domain access control. 16 domains, 2 bits each. RingNova uses domain 0
+- **DACR** = domain access control. 16 domains, 2 bits each. Cortex-A-OS uses domain 0
   for everything, set to Client (= enforce AP).
 
 ---
@@ -648,7 +648,7 @@ ARMv7-A MMU hỗ trợ 2 cấp page table:
 - **L1 → L2 page** (4 KB): entry L1 trỏ sang bảng L2 nhỏ hơn (256 entries = 1 KB),
   mỗi entry L2 map 4 KB.
 
-RingNova chọn **section mapping (1 MB)** vì:
+Cortex-A-OS chọn **section mapping (1 MB)** vì:
 
 - 3 process, mỗi process 1 MB memory → 1 section descriptor cho mỗi process
 - Kernel image < 1 MB hiện tại → vài section đủ
@@ -742,7 +742,7 @@ Mỗi entry 32-bit trong L1 table:
                                               └── Type = Section
 ```
 
-Các attribute dùng trong RingNova:
+Các attribute dùng trong Cortex-A-OS:
 
 | Tên | Giá trị | Dùng cho |
 |-----|---------|----------|
@@ -763,7 +763,7 @@ Các attribute dùng trong RingNova:
 
 - **TTBR0** = physical address của L1 table + walk attributes (cache policy cho hardware
   table walk). TTBCR=0 → TTBR0 phủ toàn 4 GB.
-- **DACR** = domain access control. 16 domain, mỗi domain 2 bit. RingNova dùng domain 0
+- **DACR** = domain access control. 16 domain, mỗi domain 2 bit. Cortex-A-OS dùng domain 0
   cho mọi thứ, set Client (= enforce AP).
 
 ---

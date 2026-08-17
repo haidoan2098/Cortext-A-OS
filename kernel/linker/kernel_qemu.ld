@@ -1,5 +1,5 @@
 /* ===========================================================
- * kernel/linker/kernel_qemu.ld — RingNova Kernel Linker Script
+ * kernel/linker/kernel_qemu.ld — Cortex-A-OS Kernel Linker Script
  *
  * Target (QEMU realview-pb-a8):
  *   Physical RAM base : 0x70000000 (128 MB)

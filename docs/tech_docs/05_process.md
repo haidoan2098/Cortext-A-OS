@@ -129,7 +129,7 @@ TTBR0 swap, no TLB flush. But isolation disappears: A still has a VA entry
 for B's region inside the same table; it's just "shouldn't be touched". A
 buggy line of code and you corrupt each other.
 
-RingNova picks **per-process page table** — following the project spec: "MMU
+Cortex-A-OS picks **per-process page table** — following the project spec: "MMU
 isolation is real". The cost: each switch writes TTBR0 and flushes the TLB.
 
 ---
@@ -185,7 +185,7 @@ assembly, with the data already in place.
 
 ### 3 static processes, no dynamic allocation
 
-RingNova fixes `NUM_PROCESSES = 3` at compile time. No `process_create()`,
+Cortex-A-OS fixes `NUM_PROCESSES = 3` at compile time. No `process_create()`,
 no fork, no allocator. PCBs live in the static array `processes[3]`, page
 tables in `proc_pgd[3][4096]`, kernel stacks in `proc_kstack[3][8192]` —
 everything in `.bss`.
@@ -736,7 +736,7 @@ nhưng cùng một bảng. Tiện — không cần swap TTBR0, không cần flus
 isolation: process A vẫn có entry VA cho vùng của B trong cùng bảng, chỉ "không nên"
 truy cập. Lỗi code = corrupt nhau.
 
-RingNova chọn **per-process page table** — đi theo spec dự án: "MMU isolation là thật".
+Cortex-A-OS chọn **per-process page table** — đi theo spec dự án: "MMU isolation là thật".
 Cost: mỗi switch phải ghi TTBR0 và flush TLB.
 
 ---
@@ -786,7 +786,7 @@ Chapter này giải quyết 1-4, để chapter context switch chỉ còn việc 
 
 ### 3 process tĩnh, không dynamic
 
-RingNova cố định `NUM_PROCESSES = 3` từ compile time. Không có `process_create()`, không
+Cortex-A-OS cố định `NUM_PROCESSES = 3` từ compile time. Không có `process_create()`, không
 có fork, không có allocator. PCB nằm trong mảng tĩnh `processes[3]`, page table nằm
 trong `proc_pgd[3][4096]` tĩnh, kernel stack trong `proc_kstack[3][8192]` tĩnh. Toàn bộ
 trong `.bss`.

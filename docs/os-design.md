@@ -1,4 +1,4 @@
-# RingNova — ARMv7-A Bare-Metal Kernel Design Document
+# Cortex-A-OS — ARMv7-A Bare-Metal Kernel Design Document
 
 > **Target:** QEMU realview-pb-a8 (development) + BeagleBone Black AM335x (deployment)
 > **CPU:** ARM Cortex-A8 (ARMv7-A, single-core)
@@ -11,7 +11,7 @@
 
 ### 1.1 Mục đích
 
-RingNova là một bare-metal kernel viết từ đầu trên ARMv7-A, mục tiêu duy nhất là hiểu OS hoạt động bên trong bằng cách tự xây dựng từng thành phần cốt lõi: boot sequence, MMU, exception handling, context switch, preemptive scheduling, syscall interface, và interactive shell.
+Cortex-A-OS là một bare-metal kernel viết từ đầu trên ARMv7-A, mục tiêu duy nhất là hiểu OS hoạt động bên trong bằng cách tự xây dựng từng thành phần cốt lõi: boot sequence, MMU, exception handling, context switch, preemptive scheduling, syscall interface, và interactive shell.
 
 ### 1.2 Hardware Targets
 
@@ -34,7 +34,7 @@ RingNova là một bare-metal kernel viết từ đầu trên ARMv7-A, mục ti�
 
 ### 1.4 Design Philosophy
 
-RingNova mượn tư duy thiết kế từ Linux ARM 32-bit: 3G/1G split, per-process page table, syscall qua SVC, preemptive scheduler. Tuy nhiên được đơn giản hóa triệt để: không L2 page table, không fork/exec, không dynamic allocation, không SMP.
+Cortex-A-OS mượn tư duy thiết kế từ Linux ARM 32-bit: 3G/1G split, per-process page table, syscall qua SVC, preemptive scheduler. Tuy nhiên được đơn giản hóa triệt để: không L2 page table, không fork/exec, không dynamic allocation, không SMP.
 
 ### 1.5 Out of Scope
 
@@ -251,7 +251,7 @@ Sau `mmu_drop_identity()`, mọi PA dereference ngẫu nhiên đều gây Data A
 
 ### 4.1 Page Table Format
 
-RingNova chỉ dùng L1 section descriptors (1 MB granularity). Mỗi page table có 4096 entries, mỗi entry 32-bit, tổng 16 KB.
+Cortex-A-OS chỉ dùng L1 section descriptors (1 MB granularity). Mỗi page table có 4096 entries, mỗi entry 32-bit, tổng 16 KB.
 
 | Entry | VA range | Purpose |
 |---|---|---|

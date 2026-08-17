@@ -1,6 +1,6 @@
 # Tech Docs — Plan
 
-> Tài liệu kỹ thuật RingNova. Mục đích: người đọc hiểu được bản chất OS kernel —
+> Tài liệu kỹ thuật Cortex-A-OS. Mục đích: người đọc hiểu được bản chất OS kernel —
 > tại sao nó tồn tại, tại sao phải làm thế, bên dưới C code thật sự xảy ra chuyện gì.
 >
 > Không phải reference manual. Không phải tutorial làm theo.
@@ -476,7 +476,7 @@ docs/tech_docs/
   Người dùng tương tác với process — chương trình chạy ở User mode.
 - User process không thể dùng bất kỳ thứ gì của kernel trực tiếp: không printf,
   không malloc, không exit(). Mọi thứ phải đi qua syscall.
-- Trên Linux, libc (glibc, musl) wrap syscall thành API dễ dùng. Trên RingNova,
+- Trên Linux, libc (glibc, musl) wrap syscall thành API dễ dùng. Trên Cortex-A-OS,
   tự viết minimal libc — chỉ cần những gì 3 process dùng.
 - crt0 (C runtime zero): code chạy TRƯỚC main(). Setup stack, gọi main(), khi main()
   return thì gọi exit(). Trên bare-metal, tự viết.
@@ -516,7 +516,7 @@ docs/tech_docs/
 #### Nguyên lý
 - OS không có giá trị nếu người dùng không tương tác được. Shell là giao diện giữa
   con người và kernel — nhận lệnh text, parse, gọi syscall, hiển thị kết quả.
-- Trên Unix/Linux gốc, shell chạy qua serial terminal — đúng paradigm RingNova đang dùng.
+- Trên Unix/Linux gốc, shell chạy qua serial terminal — đúng paradigm Cortex-A-OS đang dùng.
   Người dùng kết nối qua UART, gõ lệnh, nhận output.
 - Shell là 1 user process bình thường — không có đặc quyền đặc biệt. Nó dùng cùng syscall
   interface như mọi process khác. Điều này chứng minh: syscall layer đủ mạnh để xây ứng dụng

@@ -1,4 +1,4 @@
-# RingNova
+# Cortex-A-OS
 
 > Bare-metal ARMv7-A kernel written from scratch. 3 user processes scheduled
 > preemptively through an interactive shell — ~5000 lines of C + assembly,
@@ -58,8 +58,8 @@ Clone the repo with the bootloader submodule (required only for the BBB
 target):
 
 ```bash
-git clone --recursive <url> RingNova
-cd RingNova
+git clone --recursive <url> Cortex-A-OS
+cd Cortex-A-OS
 # or, if already cloned without --recursive:
 git submodule update --init --recursive
 ```
@@ -232,8 +232,8 @@ make --version
 Clone repo kèm submodule bootloader (chỉ cần cho target BBB):
 
 ```bash
-git clone --recursive <url> RingNova
-cd RingNova
+git clone --recursive <url> Cortex-A-OS
+cd Cortex-A-OS
 # hoặc nếu đã clone không kèm --recursive:
 git submodule update --init --recursive
 ```

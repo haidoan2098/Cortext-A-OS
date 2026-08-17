@@ -288,7 +288,7 @@ no switch-case is needed, no knowledge of which driver — just a table lookup.
 
 If EOI is sent before the handler finishes, the INTC considers the line free. If the same line fires
 again in the middle, the CPU may receive a new IRQ on top of the old handler → nested → stack corrupt
-(RingNova doesn't support nested IRQ). Correct order: **handler finishes → EOI → return to interrupted code**.
+(Cortex-A-OS doesn't support nested IRQ). Correct order: **handler finishes → EOI → return to interrupted code**.
 
 Exception: spurious IRQ (INTC reports "nobody called" — usually a race). The dispatcher **must still
 call EOI** for the spurious ID, otherwise the INTC holds the pending state and won't accept new lines.
@@ -333,7 +333,7 @@ the handler. Reasons:
 - Single-core, 1 IRQ stack per CPU — nested IRQ overwrites the stack
 - Handler must be brief, 10 ms is the deadline — don't let them pile up
 
-If a handler needs to run long (e.g. filesystem), defer to a bottom-half (deferred work). RingNova
+If a handler needs to run long (e.g. filesystem), defer to a bottom-half (deferred work). Cortex-A-OS
 has no such need — the timer handler only bumps a counter.
 
 ---
@@ -494,7 +494,7 @@ still 0 ticks → fail early instead of hanging.
 
 **Not yet tested:**
 - BBB hardware (only builds clean, SD card not flashed)
-- Nested IRQ — RingNova doesn't support it, CLAUDE.md forbids re-enabling IRQ in handler
+- Nested IRQ — Cortex-A-OS doesn't support it, CLAUDE.md forbids re-enabling IRQ in handler
 - Long-running handler — scheduler (Chapter 06) will need to measure latency
 
 ---
@@ -815,7 +815,7 @@ switch-case, không cần biết về driver nào — chỉ lookup bảng.
 ### EOI AFTER handler, không trước
 
 Nếu EOI trước khi handler chạy xong, INTC coi line đã rảnh. Nếu cùng line fire thêm lần nữa
-giữa chừng, CPU có thể nhận IRQ mới đè lên handler cũ → nested → stack corrupt (RingNova
+giữa chừng, CPU có thể nhận IRQ mới đè lên handler cũ → nested → stack corrupt (Cortex-A-OS
 không hỗ trợ nested IRQ). Thứ tự đúng: **handler chạy xong → EOI → quay về code bị ngắt**.
 
 Ngoại lệ: spurious IRQ (INTC báo "không có ai gọi" — thường do race). Dispatcher **vẫn phải
@@ -861,7 +861,7 @@ Lý do:
 - Single-core, 1 IRQ stack per CPU — nested IRQ đè stack
 - Handler phải ngắn gọn, 10 ms là deadline — không để dồn
 
-Nếu handler cần chạy lâu (ví dụ filesystem), hoãn lại bottom-half (deferred work). RingNova
+Nếu handler cần chạy lâu (ví dụ filesystem), hoãn lại bottom-half (deferred work). Cortex-A-OS
 chưa có nhu cầu — handler timer chỉ bump counter.
 
 ---
@@ -1022,7 +1022,7 @@ tick → fail sớm thay vì treo.
 
 **Chưa test:**
 - BBB hardware (chỉ build clean, chưa flash SD card)
-- Nested IRQ — RingNova không hỗ trợ, CLAUDE.md cấm re-enable IRQ trong handler
+- Nested IRQ — Cortex-A-OS không hỗ trợ, CLAUDE.md cấm re-enable IRQ trong handler
 - Long-running handler — scheduler (Chapter 06) mới cần đo latency
 
 ---

@@ -90,7 +90,7 @@ sequenceDiagram
 
 ### The ABI is a "contract" between user and kernel
 
-No magic. Just a convention both sides agree on. RingNova follows the Linux ARM
+No magic. Just a convention both sides agree on. Cortex-A-OS follows the Linux ARM
 EABI style:
 
 | Register | Role |
@@ -130,7 +130,7 @@ The kernel **never** derefs a user-supplied pointer without checking first. The 
 may point into kernel space, into unmapped memory, or into a region with wrong
 permissions. A direct deref → kernel trap → system panic because of a user mistake.
 
-The boundary on RingNova is simple: user space is 1 MB at `USER_VIRT_BASE = 0x40000000`.
+The boundary on Cortex-A-OS is simple: user space is 1 MB at `USER_VIRT_BASE = 0x40000000`.
 Every valid pointer lives in `[0x40000000, 0x40100000)`.
 
 ```c
@@ -147,7 +147,7 @@ static int valid_user_ptr(const void *p, uint32_t len) {
 This is a simplified version of Linux's `copy_from_user` / `copy_to_user`. A real
 project would replace it with a copy routine that cooperates with the page-fault
 handler (if the user pointer points to a page that isn't paged in, the fault handler
-installs the page and the syscall retries). RingNova has no demand paging, so a check
+installs the page and the syscall retries). Cortex-A-OS has no demand paging, so a check
 plus direct access is enough.
 
 ### Fault isolation: user crash ≠ kernel crash
@@ -498,7 +498,7 @@ sequenceDiagram
 
 ### ABI là "hợp đồng" giữa user và kernel
 
-Không có magic. Chỉ là convention hai bên đồng ý. RingNova dùng phong cách Linux ARM
+Không có magic. Chỉ là convention hai bên đồng ý. Cortex-A-OS dùng phong cách Linux ARM
 EABI:
 
 | Register | Vai trò |
@@ -538,7 +538,7 @@ Kernel **không bao giờ** deref pointer user cung cấp mà không kiểm tra 
 có thể trỏ vào kernel space, vào memory chưa map, vào vùng đọc-write trái phép.
 Deref thẳng → kernel trap → system panic khi user làm sai.
 
-Ranh giới đơn giản trên RingNova: user chỉ có 1 MB tại `USER_VIRT_BASE = 0x40000000`.
+Ranh giới đơn giản trên Cortex-A-OS: user chỉ có 1 MB tại `USER_VIRT_BASE = 0x40000000`.
 Mọi pointer hợp lệ nằm trong `[0x40000000, 0x40100000)`.
 
 ```c
@@ -554,7 +554,7 @@ static int valid_user_ptr(const void *p, uint32_t len) {
 
 Đây là phiên bản đơn giản của `copy_from_user` / `copy_to_user` trong Linux. Dự án
 thật sẽ thay bằng hàm copy qua page-fault handler (nếu user pointer trỏ vùng chưa
-paged in, page fault handler cài page, syscall retry). RingNova không có demand
+paged in, page fault handler cài page, syscall retry). Cortex-A-OS không có demand
 paging nên check + direct access đủ dùng.
 
 ### Fault isolation: user crash ≠ kernel crash

@@ -107,7 +107,7 @@ exception_entry_irq:
     rfefd   sp!                     /* pop PC + CPSR → return + unmask    */
 
 /* ===========================================================
- * FIQ — not used in RingNova, just halt
+ * FIQ — not used in Cortex-A-OS, just halt
  * =========================================================== */
 exception_entry_fiq:
     b       .

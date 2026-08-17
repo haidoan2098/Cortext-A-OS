@@ -157,7 +157,7 @@ int main(void) {
 ### Embedding binaries with `.incbin`
 
 On regular Linux, the kernel loads user ELFs from the filesystem via `execve`.
-RingNova has no filesystem. Solution: **build each user binary separately into a
+Cortex-A-OS has no filesystem. Solution: **build each user binary separately into a
 flat `.bin`, then bundle them into the kernel ELF at link time.**
 
 [kernel/arch/arm/proc/user_binaries.S](../../kernel/arch/arm/proc/user_binaries.S):
@@ -658,7 +658,7 @@ int main(void) {
 
 ### Embed binary bằng `.incbin`
 
-Trên Linux bình thường, kernel load user ELF từ filesystem qua `execve`. RingNova
+Trên Linux bình thường, kernel load user ELF từ filesystem qua `execve`. Cortex-A-OS
 không có filesystem. Giải pháp: **build user binary riêng thành `.bin` flat, rồi
 bundle vào kernel ELF tại link time.**
 

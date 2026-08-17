@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/qemu/run.sh — Launch RingNova on QEMU realview-pb-a8
+# scripts/qemu/run.sh — Launch Cortex-A-OS on QEMU realview-pb-a8
 #
 # Requires: qemu-system-arm, kernel ELF in build/
 # Usage: bash scripts/qemu/run.sh [--gdb]

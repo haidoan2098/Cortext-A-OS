@@ -1,5 +1,5 @@
 /* ===========================================================
- * kernel/linker/kernel_bbb.ld — RingNova Kernel Linker Script
+ * kernel/linker/kernel_bbb.ld — Cortex-A-OS Kernel Linker Script
  *
  * Target: BeagleBone Black (AM335x)
  *   Physical DDR base : 0x80000000 (512 MB)

@@ -1,5 +1,5 @@
 /* ============================================================
- * kernel/arch/arm/boot/start.S — RingNova reset entry point
+ * kernel/arch/arm/boot/start.S — Cortex-A-OS reset entry point
  *
  * Linkage (see kernel/linker/kernel_*.ld):
  *   VMA (runtime) = 0xC0100000 (QEMU) / 0xC0000000 (BBB)

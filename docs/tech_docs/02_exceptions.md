@@ -406,7 +406,7 @@ VA region.
 **Exceptions not yet tested:**
 - **Prefetch Abort** — needs MMU to create an unmapped instruction region. Chapter 03 tests it.
 - **IRQ** — interrupts are not enabled yet. Chapter 04 tests it through the timer.
-- **FIQ** — not used in RingNova.
+- **FIQ** — not used in Cortex-A-OS.
 
 3 tests are enough because **every entry stub shares the same pattern**: Data Abort proves
 LR adjust + fatal path + fault register access; Undefined proves mode switching; SVC
@@ -839,7 +839,7 @@ Sau khi có MMU (Chapter 03), có thể test bằng cách đọc vùng VA không
 **Các exception chưa test:**
 - **Prefetch Abort** — cần MMU để tạo unmapped instruction region. Chapter 03 sẽ test.
 - **IRQ** — chưa enable interrupt. Chapter 04 sẽ test qua timer.
-- **FIQ** — không dùng trong RingNova.
+- **FIQ** — không dùng trong Cortex-A-OS.
 
 3 test đủ vì **mọi entry stub chia sẻ cùng pattern**: Data Abort chứng minh LR adjust +
 fatal path + fault register access, Undefined chứng minh mode switch, SVC chứng minh

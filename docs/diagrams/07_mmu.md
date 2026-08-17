@@ -133,7 +133,7 @@ Mỗi entry trong L1 page table là 1 word (4 byte), map 1 MB.
                               +-- AP[1:0] access permission
 ```
 
-| Field | Bits | RingNova dùng |
+| Field | Bits | Cortex-A-OS dùng |
 |-------|------|---------------|
 | PA base | [31:20] | PA của section |
 | AP | [11:10] | `11` = full access, `00` = kernel-only |

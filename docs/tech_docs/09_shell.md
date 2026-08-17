@@ -4,7 +4,7 @@
 
 **English** · [Tiếng Việt](#tiếng-việt)
 
-> After 8 chapters, RingNova has the full foundation: MMU, preemptive
+> After 8 chapters, Cortex-A-OS has the full foundation: MMU, preemptive
 > scheduler, context switch, syscalls, 3 real user programs. But no one can
 > actually talk to the OS yet — stdin can't reach the kernel. This chapter
 > adds the last three pieces: a UART RX interrupt that pushes characters
@@ -340,7 +340,7 @@ Killing self: `pid == current->pid` → mark DEAD; `schedule()` at the
 
 ```c
 int main(void) {
-    ulib_puts("RingNova shell — type 'help' for commands\n");
+    ulib_puts("Cortex-A-OS shell — type 'help' for commands\n");
     char line[64];
     unsigned int n = 0;
     prompt();
@@ -522,7 +522,7 @@ bash scripts/qemu/run.sh
   fault isolation.
 - **Chapter 08 — Userspace**: ulib, crt0, build infrastructure.
 
-### The complete RingNova
+### The complete Cortex-A-OS
 
 This is the final chapter. Adding up all 9:
 
@@ -550,7 +550,7 @@ Runs on QEMU realview-pb-a8 and BeagleBone Black.
 - Demand paging (page-fault handler + allocate on demand).
 - SMP (multi-CPU) — needs locks.
 
-Those would be a different OS, not RingNova.
+Those would be a different OS, not Cortex-A-OS.
 
 ---
 
@@ -558,7 +558,7 @@ Those would be a different OS, not RingNova.
 
 **Tiếng Việt** · [English](#english)
 
-> Sau 8 chapter, RingNova có đủ móng: MMU, preemptive scheduler, context switch,
+> Sau 8 chapter, Cortex-A-OS có đủ móng: MMU, preemptive scheduler, context switch,
 > syscall, 3 user program thật. Nhưng vẫn không ai nói chuyện được với OS — stdin
 > chưa vào được kernel. Chapter này thêm 3 miếng cuối: UART RX interrupt đẩy ký tự
 > lên ring buffer, `sys_read` blocking để shell ngủ chờ input, và một user program
@@ -875,7 +875,7 @@ sẽ context_switch sang process khác.
 
 ```c
 int main(void) {
-    ulib_puts("RingNova shell — type 'help' for commands\n");
+    ulib_puts("Cortex-A-OS shell — type 'help' for commands\n");
     char line[64];
     unsigned int n = 0;
     prompt();
@@ -1050,7 +1050,7 @@ bash scripts/qemu/run.sh
   isolation.
 - **Chapter 08 — Userspace**: ulib, crt0, build infrastructure.
 
-### RingNova hoàn chỉnh
+### Cortex-A-OS hoàn chỉnh
 
 Chapter này là chapter cuối. Cộng lại qua 9 chapter:
 
@@ -1078,4 +1078,4 @@ realview-pb-a8; BBB port là extension tiếp theo (NS16550 RX IRQ chưa impleme
 - Demand paging (page fault handler + trên-cần-thiết cấp page).
 - SMP (multi-CPU) — cần lock.
 
-Nhưng những thứ đó là OS khác, không phải RingNova nữa.
+Nhưng những thứ đó là OS khác, không phải Cortex-A-OS nữa.

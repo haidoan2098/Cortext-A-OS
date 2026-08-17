@@ -251,7 +251,7 @@ sequenceDiagram
     Note over Start: setup FIQ/IRQ/ABT/UND/SVC<br/>stacks @ VA (MMU now on)
     Start->>kmain: bl kmain
     kmain->>UART: uart_init()
-    kmain->>UART: uart_printf("RingNova...")
+    kmain->>UART: uart_printf("Cortex-A-OS...")
     kmain->>UART: print boot log<br/>(.text/.data/.bss/CPSR)
     Note over kmain: for(;;) — idle loop
 ```
@@ -520,7 +520,7 @@ void kmain(void) {
     uart_init();
 
     uart_printf("================================================\n");
-    uart_printf("  RingNova — ARMv7-A bare-metal kernel\n");
+    uart_printf("  Cortex-A-OS — ARMv7-A bare-metal kernel\n");
     uart_printf("================================================\n");
 
     uart_printf("[UART] init done @ %p\n", UART0_BASE);
@@ -826,7 +826,7 @@ sequenceDiagram
     Note over Start: setup FIQ/IRQ/ABT/UND/SVC<br/>stacks @ VA (MMU now on)
     Start->>kmain: bl kmain
     kmain->>UART: uart_init()
-    kmain->>UART: uart_printf("RingNova...")
+    kmain->>UART: uart_printf("Cortex-A-OS...")
     kmain->>UART: in boot log<br/>(.text/.data/.bss/CPSR)
     Note over kmain: for(;;) — idle loop
 ```
@@ -1098,7 +1098,7 @@ void kmain(void) {
     uart_init();
 
     uart_printf("================================================\n");
-    uart_printf("  RingNova — ARMv7-A bare-metal kernel\n");
+    uart_printf("  Cortex-A-OS — ARMv7-A bare-metal kernel\n");
     uart_printf("================================================\n");
 
     uart_printf("[UART] init done @ %p\n", UART0_BASE);

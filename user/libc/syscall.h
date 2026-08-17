@@ -1,5 +1,5 @@
-#ifndef RINGNOVA_USER_SYSCALL_H
-#define RINGNOVA_USER_SYSCALL_H
+#ifndef CORTEX_A_OS_USER_SYSCALL_H
+#define CORTEX_A_OS_USER_SYSCALL_H
 
 /* ===========================================================
  * user/libc/syscall.h — User-side syscall wrappers
@@ -119,4 +119,4 @@ static inline void __attribute__((noreturn)) sys_exit(void)
     for (;;) { /* unreachable */ }
 }
 
-#endif /* RINGNOVA_USER_SYSCALL_H */
+#endif /* CORTEX_A_OS_USER_SYSCALL_H */

@@ -1,6 +1,6 @@
-# Address Space Design — RingNova Kernel
+# Address Space Design — Cortex-A-OS Kernel
 
-> Thiết kế không gian địa chỉ của RingNova trên ARMv7-A. File này được
+> Thiết kế không gian địa chỉ của Cortex-A-OS trên ARMv7-A. File này được
 > đối chiếu với code hiện tại trong `kernel/include/mmu.h`,
 > `kernel/arch/arm/mm/pgtable.c`, `kernel/arch/arm/mm/mmu.c`,
 > `kernel/proc/process.c`, `kernel/platform/*/board.h`,
@@ -15,7 +15,7 @@
 
 ## 1. Shared Virtual Address Contract
 
-ARMv7-A có 32-bit virtual address space. RingNova dùng split kiểu Linux ARM
+ARMv7-A có 32-bit virtual address space. Cortex-A-OS dùng split kiểu Linux ARM
 32-bit: kernel chạy ở high VA, user process chạy ở low VA. Translation table
 format hiện tại chỉ dùng **L1 section descriptor** nên granularity cố định là
 1 MB; không có L2 page table.
@@ -38,7 +38,7 @@ L1 table riêng 16 KB, 4096 section descriptors.
 | `[0xC0000000, 0xC0000000 + RAM_SIZE)` | Kernel | High-VA alias of physical RAM |
 | `[0xC0000000 + RAM_SIZE, 0x100000000)` | None | Unmapped |
 
-The low 3 GB are the user side of the 3G/1G split, but RingNova also installs
+The low 3 GB are the user side of the 3G/1G split, but Cortex-A-OS also installs
 some **privileged low-VA device identity mappings** in every page table. Those
 device mappings are kernel-only by AP bits; user code cannot access them even
 though their VA lies below `0xC0000000`.
@@ -85,7 +85,7 @@ Design consequence:
 
 - User code cannot read/write kernel RAM or device MMIO because `PDE_AP_KERN_RW`
   allows privileged access only.
-- The 1 MB user section is RWX as a tradeoff of section-only mapping. RingNova
+- The 1 MB user section is RWX as a tradeoff of section-only mapping. Cortex-A-OS
   does not yet split user `.text`, `.data`, `.bss`, and stack with L2 pages.
 - Kernel `.text` is also mapped RW at section level. This is acceptable for the
   current educational kernel but not a hardened production layout.
