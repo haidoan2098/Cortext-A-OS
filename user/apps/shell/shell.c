@@ -110,7 +110,7 @@ static void dispatch(char *line)
 
 int main(void)
 {
-    ulib_puts("\nRingNova shell — type 'help' for commands\n");
+    ulib_puts("\nCortex-A-OS shell — type 'help' for commands\n");
 
     char line[LINE_MAX];
     unsigned int n = 0;
@@ -151,4 +151,30 @@ int main(void)
     }
 
     return 0;   /* unreachable */
+}
+
+/* ---------------------------------------------------------------
+ * Second thread of the shell process — prints a heartbeat when it
+ * gets the CPU.
+ *
+ * It must NOT call sys_read: the kernel's wait slot for UART input
+ * (scheduler.c: blocked_reader) holds exactly one thread, so a
+ * second reader would overwrite the first and leave it BLOCKED
+ * forever. Printing only is safe.
+ *
+ * The delay is what keeps the prompt usable — a heartbeat on every
+ * 10 ms time slice would print ~100 lines/second and bury it.
+ * --------------------------------------------------------------- */
+#define HEARTBEAT_TICKS  500U   /* 500 × 10 ms = 5 s */
+
+void thread_main(unsigned int idx)
+{
+    for (;;) {
+        ulib_delay_ticks(HEARTBEAT_TICKS);
+
+        ulib_puts("\r\n");
+        ulib_tag_tid(idx);
+        ulib_puts("heartbeat — shell worker thread alive\r\n");
+        prompt();
+    }
 }

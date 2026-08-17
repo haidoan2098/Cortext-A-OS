@@ -42,11 +42,47 @@ void ulib_putu(unsigned int v)
         ulib_putc(buf[i]);
 }
 
+void ulib_putx(unsigned int v)
+{
+    /* .rodata — read-only, so threads sharing this address space
+     * can use it concurrently without any coordination. */
+    static const char hexdig[] = "0123456789abcdef";
+
+    for (int shift = 28; shift >= 0; shift -= 4)
+        ulib_putc(hexdig[(v >> shift) & 0xFU]);
+}
+
+void ulib_delay_ticks(unsigned int ticks)
+{
+    unsigned int start = sys_ticks();
+    while ((sys_ticks() - start) < ticks)
+        sys_yield();
+}
+
 void ulib_tag(void)
 {
     ulib_puts("[pid ");
     ulib_putu((unsigned int)sys_getpid());
     ulib_puts("] ");
+}
+
+void ulib_tag_tid(unsigned int idx)
+{
+    ulib_puts("[pid ");
+    ulib_putu((unsigned int)sys_getpid());
+    ulib_putc('.');
+    ulib_putu(idx);
+    ulib_puts("] ");
+}
+
+/* Weak default thread body — a program that defines its own
+ * thread_main() overrides this at link time. Retiring the thread
+ * immediately keeps unused thread slots out of the run queue;
+ * `ps` shows them as DEAD. */
+__attribute__((weak)) void thread_main(unsigned int idx)
+{
+    (void)idx;
+    sys_exit();
 }
 
 int ulib_strcmp(const char *a, const char *b)

@@ -5,25 +5,31 @@
  *
  * Saves prev's kernel state (callee-saved GPRs + lr pushed on
  * prev's SVC stack, plus banked SP_usr/LR_usr into prev->ctx)
- * then loads next's equivalents. Swaps TTBR0 and flushes TLB
- * between save and load.
+ * then loads next's equivalents.
  *
- * The switched-to address space comes from next->proc->pgd_pa —
- * threads borrow the page table of the process that owns them.
+ * Two paths through the middle:
+ *   - different processes → reprogram TTBR0, flush TLB + I-cache
+ *   - same process        → skip all of that; the two threads
+ *                           already share one page table
+ * That skip is the concrete reason a thread switch costs less
+ * than a process switch: not "threads are lighter" in the
+ * abstract, but one avoided TLB and I-cache flush.
  *
  * prev == NULL is a legal "no-save, load-only" form used by the
- * very first call from kmain to bootstrap threads[0]. In that
- * case the epilogue still pops next's 9-word kernel-resume frame
- * and bx lr's to ret_from_first_entry (pre-baked into the
- * initial stack), which drains the 16-word IRQ-exit frame and
- * atomically enters USR mode.
+ * very first call from kmain to bootstrap threads[0]. It takes
+ * the cross-process path unconditionally — TTBR0 still holds
+ * boot_pgd at that moment. The epilogue then pops next's 9-word
+ * kernel-resume frame and bx lr's to ret_from_first_entry
+ * (pre-baked into the initial stack), which drains the 16-word
+ * IRQ-exit frame and atomically enters USR mode.
  *
  * Caller is expected to be in SVC mode with CPSR.I already
  * matching the desired interrupt state; this routine does not
  * change the interrupt mask.
  *
  * Struct offsets are duplicated here and checked by _Static_assert
- * in kernel/include/proc.h — drift triggers a compile error.
+ * in kernel/include/thread.h and proc.h — drift triggers a
+ * compile error.
  * =========================================================== */
 
     .equ CTX_SP_SVC_OFFSET,     52
@@ -41,7 +47,9 @@ context_switch:
 
     /* ----- save side ------------------------------------- */
     cmp     r0, #0
-    beq     .Lload_next
+    beq     ctxsw_switch_mm         @ first entry: nothing to save,
+                                    @ and TTBR0 still holds boot_pgd
+                                    @ so the MMU work is mandatory
 
     /* Push callee-saved GPRs + return address onto prev's SVC
      * stack. 9 words total; sp is now at the top of that frame. */
@@ -56,13 +64,37 @@ context_switch:
     str     lr, [r0, #CTX_LR_USR_OFFSET]
     cps     #0x13
 
-.Lload_next:
-    /* ----- swap address space ---------------------------- */
-    /* The page table belongs to the PROCESS, not the thread, so
-     * reach it through next->proc. Two threads of one process
-     * resolve to the same pgd_pa here — a future optimisation can
-     * turn that into an early-out that skips the TLB/I-cache
-     * flush entirely when prev and next share a process. */
+    /* ----- same address space? --------------------------- */
+    /* Threads of one process share a page table, so TTBR0 would
+     * be rewritten with the value it already holds and the TLB +
+     * I-cache flushed for nothing. Compare owners and skip.
+     *
+     * r2/r3 are scratch under AAPCS — a callee may clobber them
+     * freely. r1 must survive: it is dereferenced all the way
+     * down to the epilogue. */
+    ldr     r2, [r0, #THREAD_PROC_OFFSET]   @ r2 = prev->proc
+    ldr     r3, [r1, #THREAD_PROC_OFFSET]   @ r3 = next->proc
+    cmp     r2, r3
+    beq     .Lload_next                     @ same process: no MMU work
+
+/* ----- cross-process path: reprogram the MMU -------------
+ *
+ * Reached when prev and next belong to different processes, and
+ * unconditionally on first-time entry. The page table belongs to
+ * the PROCESS, so it comes from next->proc->pgd_pa — reload it
+ * here rather than reusing r3 above, because the prev == NULL
+ * branch arrives with r3 undefined.
+ *
+ * Global label (not .L) on purpose: it makes the expensive path
+ * breakpointable, which is how you verify the skip above really
+ * fires instead of silently never being taken.
+ *
+ * Contract this relies on: page tables are immutable after
+ * process_init_all(). If mappings ever become editable at
+ * runtime, whoever edits them owns the flush — a same-process
+ * switch will not do it for them. */
+    .global ctxsw_switch_mm
+ctxsw_switch_mm:
     ldr     r2, [r1, #THREAD_PROC_OFFSET]   @ r2 = next->proc
     ldr     r2, [r2, #PROC_PGD_PA_OFFSET]   @ r2 = next->proc->pgd_pa
     orr     r2, r2, #0x4A                   @ TTBR0 walk attrs
@@ -75,7 +107,13 @@ context_switch:
     dsb
     isb
 
-    /* ----- load next ------------------------------------- */
+.Lload_next:
+    /* ----- load next ------------------------------------- *
+     * Per-THREAD state from here down, so it runs on BOTH paths.
+     * The skip above bypasses MMU work only — banked registers
+     * and the kernel stack are private to each thread and must
+     * be swapped even between siblings. */
+
     /* Restore banked USR regs before leaving SYS mode. */
     cps     #0x1F
     ldr     sp, [r1, #CTX_SP_USR_OFFSET]

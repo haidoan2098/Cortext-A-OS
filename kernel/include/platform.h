@@ -40,7 +40,7 @@
  * page — a stack overflow silently corrupts the neighbour.
  */
 #define NUM_PROCESSES       3U
-#define THREADS_PER_PROC    1U
+#define THREADS_PER_PROC    2U
 #define NUM_THREADS         (NUM_PROCESSES * THREADS_PER_PROC)
 #define KSTACK_SIZE         8192U
 #define USER_STACK_SIZE     0x00010000U                       /* 64 KB */
