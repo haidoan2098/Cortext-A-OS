@@ -207,7 +207,7 @@ Tại `_start_va` (VA mode), reseat tất cả exception mode stacks bằng abso
 | UND | 1 KB | Trampoline only |
 | SVC | 8 KB | Main kernel stack (trước process init) |
 
-Sau process init, mỗi process có kernel stack SVC 8 KB riêng — shared exception stacks chỉ dùng làm trampoline.
+Sau thread init, mỗi thread có kernel stack SVC 8 KB riêng — shared exception stacks chỉ dùng làm trampoline.
 
 ### 3.6 kmain Initialization Order
 
@@ -219,10 +219,11 @@ irq_init()                 → Zero dispatch table, init INTC chip
 timer_init(10000)          → 10 ms tick
 irq_register(IRQ_TIMER, timer_irq) + irq_enable()
 irq_register(IRQ_UART0, uart_rx_irq) + irq_enable()
-process_init_all()         → Build all 3 PCBs
+process_init_all()         → Build all 3 process address spaces
+thread_init_all()          → Build all 6 thread execution contexts (2/process)
 mmu_drop_identity()        → Remove PA identity map
 timer_set_handler(scheduler_tick)  → Arm preemptive scheduling
-process_first_run(&processes[0])   → First user process entry (noreturn)
+thread_first_run(&threads[0])      → First thread entry (noreturn)
 ```
 
 ### 3.7 Identity Map Lifecycle
@@ -329,16 +330,22 @@ User VA `0x40000000` maps to different PA per process. Cần I-cache invalidatio
 
 ## 5. Process Model
 
-### 5.1 Static Process Table
+### 5.1 Static Process + Thread Tables
 
 ```c
-process_t processes[NUM_PROCESSES];  // NUM_PROCESSES = 3
-process_t *current;                  // Currently running process
+process_t processes[NUM_PROCESSES];  // NUM_PROCESSES = 3 — address spaces
+thread_t  threads[NUM_THREADS];      // NUM_THREADS = 6 — execution units
+thread_t *current;                   // Currently running THREAD
 ```
 
-Cả hai đều trong BSS, zero-initialized bởi `start.S`.
+Mỗi process chạy `THREADS_PER_PROC = 2` thread. Scheduler lập lịch trên
+`threads[]`, không phải `processes[]` — `current` là con trỏ thread. Cả ba
+mảng đều trong BSS, zero-initialized bởi `start.S`.
 
-### 5.2 PCB Layout
+### 5.2 process_t / thread_t Layout
+
+Process (địa chỉ không gian) và thread (execution context) là hai struct
+tách biệt — `proc.h` và `thread.h`:
 
 ```c
 typedef struct {
@@ -348,24 +355,33 @@ typedef struct {
     uint32_t spsr;          // [60]    Saved CPSR
     uint32_t sp_usr;        // [64]    User stack pointer (banked)
     uint32_t lr_usr;        // [68]    User link register (banked)
-} proc_context_t;           // Total 72 bytes
+} cpu_context_t;             // Total 72 bytes
+
+typedef struct thread {
+    cpu_context_t   ctx;     // [0..71]
+    struct process *proc;    // [72] địa chỉ không gian sở hữu — THREAD_PROC_OFFSET
+    uint32_t        tid;     // global index vào threads[]
+    uint32_t        index;   // index trong process (0 = main thread)
+    task_state_t    state;
+    void           *kstack_base;   // 8 KB, RIÊNG cho mỗi thread
+    uint32_t        kstack_size;
+    uint32_t        user_stack_top;  // slice riêng trong 1 MB user window
+} thread_t;
 
 typedef struct process {
-    proc_context_t ctx;     // [0..71]
-    uint32_t       pid;     // [72]
-    task_state_t   state;   // [76]
-    const char    *name;    // [80]
-    uint32_t      *pgd;     // [84] VA of L1 table
-    uint32_t       pgd_pa;  // [88] PA for TTBR0
-    void          *kstack_base;
-    uint32_t       kstack_size;  // 8192
-    uint32_t       user_entry;       // = USER_VIRT_BASE
-    uint32_t       user_stack_top;  // = USER_VIRT_BASE + 1 MB
-    uint32_t       user_phys_base;  // per-process PA slot
+    uint32_t     pid;
+    const char  *name;
+    uint32_t    *pgd;         // [0]  VA của L1 table
+    uint32_t     pgd_pa;      // [12] PA cho TTBR0 — PROC_PGD_PA_OFFSET
+    uint32_t     user_entry;      // = USER_VIRT_BASE
+    uint32_t     user_phys_base;  // per-process PA slot
+    thread_t    *threads[THREADS_PER_PROC];
 } process_t;
 ```
 
-Field offsets dùng trong assembly (`context_switch.S`) được enforce bằng `_Static_assert` trong `proc.h`.
+Field offsets dùng trong assembly (`context_switch.S`) được enforce bằng
+`_Static_assert` trong `proc.h`/`thread.h`. `context_switch.S` đọc `pgd_pa`
+qua hai bước gián tiếp: `next->proc->pgd_pa`.
 
 ### 5.3 Process States
 
@@ -391,15 +407,15 @@ typedef enum {
                     DEAD        (scheduler skip)
 ```
 
-### 5.4 Kernel Stack per Process
+### 5.4 Kernel Stack per Thread
 
-Mỗi process có 8 KB kernel stack riêng (BSS: `proc_kstack[3][8192]`). Chỉ SVC mode dùng stack này.
+Mỗi thread có 8 KB kernel stack riêng (BSS: `thread_kstack[NUM_THREADS][8192]`), không phải per-process — hai thread cùng process vẫn có SVC stack tách biệt, vì mỗi thread có thể trap vào kernel (syscall/IRQ) độc lập với sibling của nó.
 
-Các exception stack (IRQ/ABT/UND/FIQ) là shared trampoline stacks trong `.stack` section — tổng 11.5 KB (FIQ 512 B, IRQ 1 KB, ABT 1 KB, UND 1 KB, SVC 8 KB initial). Exception code chỉ dùng các stack này để save vài registers rồi switch ngay sang SVC mode + per-process stack.
+Các exception stack (IRQ/ABT/UND/FIQ) là shared trampoline stacks trong `.stack` section — tổng 11.5 KB (FIQ 512 B, IRQ 1 KB, ABT 1 KB, UND 1 KB, SVC 8 KB initial). Exception code chỉ dùng các stack này để save vài registers rồi switch ngay sang SVC mode + kernel stack của thread hiện tại.
 
 ### 5.5 25-Word Initial Stack Frame
 
-Khi process chưa từng chạy, kernel pre-build một frame tại đỉnh kernel stack 8 KB:
+Khi thread chưa từng chạy, kernel pre-build một frame tại đỉnh kernel stack 8 KB (`thread_build_initial_frame`). `r0` trong 16-word frame không phải lúc nào cũng 0 — nó mang **thread index** mà `crt0.S` đọc để quyết định gọi `main()` (index 0) hay `thread_main(idx)` (index khác 0):
 
 ```
 High addr (0x2000 above kstack_base)
@@ -407,7 +423,8 @@ High addr (0x2000 above kstack_base)
 │ CPSR = 0x10 (USR mode)  │  ← first popped by rfefd
 │ PC   = USER_VIRT_BASE   │
 │ LR   = 0                │  16-word IRQ-exit frame
-│ r12..r0 = 0             │  (consumed by ret_from_first_entry)
+│ r0 = thread index       │  (consumed by ret_from_first_entry)
+│ r12..r1 = 0             │
 ├─────────────────────────┤
 │ LR   = ret_from_first_entry │
 │ r11..r4 = 0             │  9-word kernel-resume frame
@@ -420,21 +437,21 @@ Low addr
 
 ### 5.6 Process Initialization
 
-`process_init_all()`:
+`process_init_all()` — dựng address space (chạy trước, không tạo thread):
 
 ```
 for each process i:
-  1. Clear PCB, set pid = i, state = READY, name
+  1. Clear PCB, set pid = i, name
   2. pgd = &proc_pgd[i], pgd_pa = VA(pgd) - PHYS_OFFSET
-  3. kstack = &proc_kstack[i]
-  4. user_phys_base = USER_PHYS_BASE + i * USER_PHYS_STRIDE
-  5. Copy user binary:
+  3. user_phys_base = USER_PHYS_BASE + i * USER_PHYS_STRIDE
+  4. Copy user binary:
      user_va_alias = user_phys_base + PHYS_OFFSET  (via kernel high VA)
      kmemcpy(user_va_alias, img_start, img_size)
-  6. icache_sync(user_va_alias, img_size)  (D-cache clean + I-cache invalidate)
-  7. pgtable_build_for_proc(pgd, user_phys_base)
-  8. process_build_initial_frame(p)
+  5. icache_sync(user_va_alias, img_size)  (D-cache clean + I-cache invalidate)
+  6. pgtable_build_for_proc(pgd, user_phys_base)
 ```
+
+`thread_init_all()` — chạy sau, dựng execution context cho từng thread của mỗi process (kstack, state = READY, user_stack_top slice riêng, `thread_build_initial_frame`).
 
 ### 5.7 User Binary Embedding
 
@@ -450,15 +467,15 @@ _shell_img_start:   .incbin "build/user/shell.bin"
 _shell_img_end:
 ```
 
-### 5.8 First Process Bootstrap
+### 5.8 First Thread Bootstrap
 
 ```c
-void process_first_run(process_t *first) {
+void thread_first_run(thread_t *first) {
     context_switch(NULL, first);  // NULL prev → skip save side
 }
 ```
 
-`context_switch(NULL, first)`: bỏ qua save side, load side pop initial frame từ `first->ctx.sp_svc`, `bx lr` → `ret_from_first_entry` → `rfefd sp!` → USR mode tại `0x40000000`. `kmain()` không bao giờ return sau call này.
+`kmain()` gọi `thread_first_run(&threads[0])`. `context_switch(NULL, first)`: bỏ qua save side, load side pop initial frame từ `first->ctx.sp_svc`, `bx lr` → `ret_from_first_entry` → `rfefd sp!` → USR mode tại `0x40000000`. `kmain()` không bao giờ return sau call này.
 
 ---
 
@@ -498,9 +515,9 @@ void schedule(void) {
         return;
     }
 
-    // Round-robin từ pid+1
-    for (i = 1; i < NUM_PROCESSES; i++) {
-        cand = &processes[(current->pid + i) % NUM_PROCESSES];
+    // Round-robin từ tid+1 — quét threads[], không phải processes[]
+    for (i = 1; i < NUM_THREADS; i++) {
+        cand = &threads[(current->tid + i) % NUM_THREADS];
         if (cand->state == TASK_READY || cand->state == TASK_RUNNING) {
             perform_switch(current, cand);
             return;
@@ -510,31 +527,35 @@ void schedule(void) {
 }
 ```
 
-`perform_switch(prev, cand)`: demote prev→READY (nếu RUNNING), set cand→RUNNING, update `current`, gọi `context_switch(prev, cand)`.
+`perform_switch(prev, cand)`: demote prev→READY (nếu RUNNING), set cand→RUNNING, update `current`, gọi `context_switch(prev, cand)`. Vì ring walk trên `threads[]`, hai thread cùng process được lập lịch độc lập với nhau.
 
 ### 6.4 BLOCKED-State I/O
 
-Đây là cơ chế tránh busy-wait khi shell gọi `sys_read` mà chưa có input:
+Đây là cơ chế tránh busy-wait khi một thread gọi `sys_read` mà chưa có input. Waiter được giữ trong FIFO ring `uart_waitq[NUM_THREADS]` (không phải 1 slot đơn) — bất kỳ số thread nào cũng có thể block cùng lúc; mỗi byte đến đánh thức đúng một thread, theo thứ tự block trước:
 
 ```c
 void scheduler_block_on_input(void) {
     current->state = TASK_BLOCKED;
-    blocked_reader = current;
+    waitq_push(current);           // vào cuối FIFO ring
     scheduler_request_resched();   // set flag + schedule()
-    // Process ngừng chạy ở đây, UART IRQ sẽ wake
+    // Thread ngừng chạy ở đây, UART IRQ sẽ wake
 }
 
 void scheduler_wake_reader(void) {
-    if (blocked_reader && blocked_reader->state == TASK_BLOCKED) {
-        blocked_reader->state = TASK_READY;
-        wake_hint = blocked_reader;  // Priority boost
-        blocked_reader = NULL;
-        scheduler_request_resched();
-    }
+    // Pop đầu ring; bỏ qua entry đã DEAD (bị kill trong lúc chờ)
+    // rồi mới trả về — tránh corpse "nuốt" mất wakeup.
+    thread_t *t;
+    while ((t = waitq_pop()) && t->state != TASK_BLOCKED)
+        continue;
+    if (!t) return;
+
+    t->state = TASK_READY;
+    wake_hint = t;                 // Priority boost
+    scheduler_request_resched();
 }
 ```
 
-**Single-slot design**: chỉ shell dùng blocking read. Mở rộng cho nhiều reader cần wait queue.
+`waitq_push` từ chối enqueue một thread đã có mặt trong ring — cần thiết vì `schedule()` có thể trả về ngay mà không switch khi không còn thread nào runnable khác, khiến `sys_read` gọi lại `scheduler_block_on_input()` trong lúc thread vẫn đang BLOCKED.
 
 ### 6.5 wake_hint Priority Boost
 
@@ -884,12 +905,16 @@ VMA = 0x40000000
 
 ```asm
 _ustart:
-    bl      main
-    mov     r7, #3          @ SYS_EXIT
-    svc     #0
+    cmp     r0, #0          @ r0 = thread index, do kernel truyền vào
+    bne     .Lthread_entry
+    bl      main            @ index 0 → main thread
+    b       __noreturn_sys_exit
+.Lthread_entry:
+    bl      thread_main     @ index != 0 → thread_main(idx), r0 = idx
+    b       __noreturn_sys_exit
 ```
 
-Entry point `_ustart`, gọi `main()`, nếu return thì `sys_exit`.
+Entry point `_ustart` giờ được **mọi thread** của một process trỏ tới — kernel không biết gì về symbol của user program, nên chỉ truyền thread index qua `r0` và để `crt0` tự dispatch. Nếu `main()`/`thread_main()` return thì `sys_exit`. Chương trình không định nghĩa `thread_main` sẽ dùng bản `weak` mặc định trong `ulib` (chỉ gọi `sys_exit`).
 
 ### 10.4 Minimal Libc
 
@@ -900,23 +925,28 @@ Entry point `_ustart`, gọi `main()`, nếu return thì `sys_exit`.
 | `ulib_strlen(s)` | String length |
 | `ulib_puts(s)` | Output string via `sys_write` |
 | `ulib_putu(n)` | Output unsigned decimal |
+| `ulib_putx(n)` | Output 8-digit hex, no `0x` |
 | `ulib_putc(c)` | Output single char |
+| `ulib_printf(fmt, ...)` | Format one line vào buffer local, emit bằng **một** `sys_write` — atomic vì syscall chạy với IRQ masked, nên nhiều thread ghi UART không xé chữ của nhau giữa chừng |
+| `ulib_delay_ticks(n)` | Yield-loop chờ n tick (10 ms/tick) |
 | `ulib_strcmp(a, b)` | String compare |
 | `ulib_strncmp(a, b, n)` | Bounded string compare |
 | `ulib_atoi(s)` | ASCII to integer |
-| `ulib_tag(pid, msg)` | Format `[PID] msg` output |
+| `thread_main(idx)` | Entry point cho thread không phải main (index != 0); `ulib` cung cấp bản `weak` mặc định chỉ gọi `sys_exit` |
 
-Không có `malloc`, `errno`, `FILE`, `printf`.
+Không có `malloc`, `errno`, `FILE`, libc `printf` chuẩn.
 
 **Syscall wrappers (`user/libc/syscall.h`):** inline assembly, mỗi wrapper gọi `svc #0` với r7 = syscall number.
 
-### 10.5 Three User Programs
+### 10.5 Three User Programs, 2 Threads Each
 
-| Program | PID | Behavior | Demonstrates |
-|---|---|---|---|
-| **counter** | 0 | In số đếm tăng dần, đo delta bằng `sys_ticks`, yield mỗi ~3 s | Cooperative multitasking, timer |
-| **runaway** | 1 | Vòng lặp vô hạn, không yield | Preemption — kernel cưỡng chế CPU |
-| **shell** | 2 | Đọc command từ UART, parse + dispatch 6 lệnh | Interactive I/O, blocking read, fault isolation |
+Mỗi process chạy `THREADS_PER_PROC = 2` thread — main thread (index 0) + một thread thứ hai (`thread_main`) với hành vi riêng cho từng chương trình:
+
+| Program | PID | Thread 0 (main) | Thread 1 (thread_main) | Demonstrates |
+|---|---|---|---|---|
+| **counter** | 0 | Ghi `shared_count`, in số đếm mỗi ~3 s | Chỉ đọc `shared_count`, in giá trị quan sát được | Shared `.bss` giữa 2 thread, stack riêng mỗi thread |
+| **runaway** | 1 | Vòng lặp vô hạn, không yield | Vòng lặp vô hạn thứ hai, cũng không yield | Preemption hoạt động **giữa 2 thread cùng process**, không chỉ giữa process |
+| **shell** | 2 | Đọc command từ UART, parse + dispatch 6 lệnh | In heartbeat định kỳ (không gọi `sys_read`) | Interactive I/O, blocking read qua FIFO wait queue, fault isolation |
 
 **Shell commands:**
 | Command | Description |
@@ -935,10 +965,10 @@ Không có `malloc`, `errno`, `FILE`, `printf`.
 ### 11.1 Function Signature
 
 ```c
-void context_switch(process_t *prev, process_t *next);
+void context_switch(thread_t *prev, thread_t *next);
 ```
 
-Pure assembly (`kernel/arch/arm/proc/context_switch.S`). Called from SVC mode with IRQ masked. `prev=NULL` là special case cho first-time process entry.
+Pure assembly (`kernel/arch/arm/proc/context_switch.S`). Called from SVC mode with IRQ masked. `prev=NULL` là special case cho first-time thread entry.
 
 ### 11.2 Save Side (prev != NULL)
 
@@ -952,18 +982,32 @@ str lr_usr, [prev, #CTX_LR_USR_OFFSET]
 cps #0x13                       @ Back to SVC mode
 ```
 
-### 11.3 Address-Space Switch
+### 11.3 Address-Space Switch — với same-process skip
+
+Trước khi đụng tới MMU, so sánh `prev->proc` với `next->proc`. Hai thread cùng process share một page table, nên nếu bằng nhau thì **bỏ qua toàn bộ** đoạn dưới — không có gì để reload:
 
 ```
-ldr r0, [next, #PROC_PGD_PA_OFFSET]
-orr r0, #0x4A                   @ WB-WA shareable attributes
-mcr p15, 0, r0, c2, c0, 0      @ TTBR0 = next->pgd_pa | 0x4A
-mov r0, #0
-mcr p15, 0, r0, c8, c7, 0      @ TLBIALL
-mcr p15, 0, r0, c7, c5, 0      @ ICIALLU
+ldr r2, [prev, #THREAD_PROC_OFFSET]   @ r2 = prev->proc
+ldr r3, [next, #THREAD_PROC_OFFSET]   @ r3 = next->proc
+cmp r2, r3
+beq .Lload_next                       @ cùng process — skip MMU work
+```
+
+Chỉ khi khác process mới chạy tới đoạn reprogram TTBR0 (`next->pgd_pa` đọc qua `next->proc->pgd_pa`, hai bước gián tiếp):
+
+```
+ldr r2, [next, #THREAD_PROC_OFFSET]
+ldr r2, [r2, #PROC_PGD_PA_OFFSET]
+orr r2, #0x4A                   @ WB-WA shareable attributes
+mcr p15, 0, r2, c2, c0, 0      @ TTBR0 = next->proc->pgd_pa | 0x4A
+mov r2, #0
+mcr p15, 0, r2, c8, c7, 0      @ TLBIALL
+mcr p15, 0, r2, c7, c5, 0      @ ICIALLU
 dsb
 isb
 ```
+
+Đây là lý do cụ thể khiến thread switch rẻ hơn process switch: không phải "thread nhẹ hơn" một cách trừu tượng, mà là **tránh được một lần flush TLB + I-cache toàn bộ**. `prev=NULL` (first-time entry) luôn đi qua nhánh reprogram — tại thời điểm đó TTBR0 vẫn đang giữ `boot_pgd`, không thể skip.
 
 ### 11.4 Load Side
 
@@ -1020,10 +1064,9 @@ svc #0 → handle_svc() → syscall_dispatch() → schedule() → context_switch
 
 - **No L2 page tables** — 1 MB granularity only, user section RWX
 - **No demand paging** — toàn bộ memory static, không page allocator
-- **No fork/exec** — process count cố định (3), tạo tại boot time
+- **No fork/exec/thread_create** — process count (3) và thread/process (2) cố định, tạo tại boot time
 - **No W^X** — kernel .text mapped RW, user .text RWX
-- **No stack guard** — user 1 MB window không có guard page
-- **Single-reader I/O** — `blocked_reader` single slot, không wait queue
+- **No stack guard** — user 1 MB window không có guard page, kể cả giữa các thread-stack slice trong cùng process
 - **Single-core** — không SMP, IRQ nesting disabled
 - **No dynamic allocation** — `kmalloc`/`free` không tồn tại
 
