@@ -44,16 +44,64 @@ void scheduler_request_resched(void)
 }
 
 /* -----------------------------------------------------------
- * BLOCKED state — only one thread can sleep on UART input at
- * a time (the shell's main thread). One pointer slot is enough;
- * multi-reader support would require a wait queue.
+ * UART input wait queue
+ *
+ * Any number of threads may sit in sys_read waiting for a byte,
+ * so the waiters live in a FIFO ring rather than a single slot.
+ * FIFO order is the point: the thread that blocked first gets the
+ * first byte that arrives, which is both fair and observable.
+ *
+ * Capacity NUM_THREADS is provably enough — waitq_push refuses to
+ * enqueue a thread that is already queued, so the ring can never
+ * hold more entries than there are threads.
+ *
+ * No locking anywhere in here. The whole block/wake path runs with
+ * CPSR.I = 1: ARMv7-A masks IRQ on SVC entry, and the UART IRQ
+ * handler that calls scheduler_wake_reader() is itself an
+ * exception. So "check the ring is empty, enqueue, sleep" is
+ * atomic by construction and the classic lost-wakeup race cannot
+ * happen here.
  *
  * wake_hint: just-woken thread to prefer on the next schedule()
  * so I/O-bound readers aren't stuck behind a CPU hog under plain
  * round-robin. Consumed once, then fall back to the ring walk.
  * ----------------------------------------------------------- */
-static thread_t *blocked_reader;
+#define WAITQ_CAP   NUM_THREADS
+
+static thread_t *uart_waitq[WAITQ_CAP];
+static uint32_t  waitq_head;        /* index of the next thread to wake */
+static uint32_t  waitq_count;       /* entries currently queued         */
+
 static thread_t *wake_hint;
+
+/* Append t to the tail. Ignores a thread that is already queued —
+ * see the re-entry note in scheduler_block_on_input(). */
+static void waitq_push(thread_t *t)
+{
+    for (uint32_t i = 0; i < waitq_count; i++) {
+        if (uart_waitq[(waitq_head + i) % WAITQ_CAP] == t)
+            return;                 /* already waiting — no double entry */
+    }
+
+    if (waitq_count >= WAITQ_CAP)
+        return;                     /* unreachable given the check above */
+
+    uart_waitq[(waitq_head + waitq_count) % WAITQ_CAP] = t;
+    waitq_count++;
+}
+
+/* Remove and return the head, or NULL when the queue is empty. */
+static thread_t *waitq_pop(void)
+{
+    if (waitq_count == 0)
+        return (thread_t *)0;
+
+    thread_t *t = uart_waitq[waitq_head];
+    uart_waitq[waitq_head] = (thread_t *)0;
+    waitq_head = (waitq_head + 1U) % WAITQ_CAP;
+    waitq_count--;
+    return t;
+}
 
 void scheduler_block_on_input(void)
 {
@@ -61,21 +109,53 @@ void scheduler_block_on_input(void)
         return;
 
     current->state = TASK_BLOCKED;
-    blocked_reader = current;
+    waitq_push(current);
     need_reschedule = 1;
     schedule();
-    /* Returns here once UART IRQ woke us up and the scheduler
-     * switched back in. Caller then finishes the sys_read loop. */
+
+    /* Normally returns here once the UART IRQ woke us up and the
+     * scheduler switched back in; the caller then finishes its
+     * sys_read loop.
+     *
+     * But schedule() also returns immediately, without switching,
+     * when no OTHER thread is runnable — this thread is BLOCKED
+     * and still on the CPU. sys_read then loops and calls back in
+     * here, which is why waitq_push must reject duplicates: the
+     * alternative is one thread filling the ring by itself. The
+     * resulting behaviour is a busy-wait for input, acceptable
+     * only because this kernel has no idle thread to fall back
+     * on. */
 }
 
 void scheduler_wake_reader(void)
 {
-    thread_t *t = blocked_reader;
-    if (t && t->state == TASK_BLOCKED) {
+    /* Wake exactly one waiter — the byte that just arrived can
+     * only satisfy a single reader, so waking the rest would have
+     * them all race for it and go back to sleep.
+     *
+     * Threads killed while queued are still in the ring: sys_kill
+     * marks them DEAD without touching any wait queue, on purpose
+     * (a kill path that must know about every queue in the kernel
+     * is a coupling that rots). So skip past corpses instead of
+     * letting one swallow the wakeup and leave a live reader
+     * asleep. */
+    for (;;) {
+        thread_t *t = waitq_pop();
+
+        if (!t)
+            return;                 /* nobody left waiting */
+        if (t->state != TASK_BLOCKED)
+            continue;               /* DEAD, or already woken — drop it */
+
+        /* Tracing the wake order is the way to verify FIFO
+         * fairness; it prints once per keystroke, so keep it out
+         * of normal builds:
+         *   uart_printf("[WAITQ] wake tid=%u (%u still queued)\n",
+         *               t->tid, waitq_count);                     */
         t->state = TASK_READY;
-        blocked_reader = (thread_t *)0;
         wake_hint = t;
         need_reschedule = 1;
+        return;
     }
 }
 
