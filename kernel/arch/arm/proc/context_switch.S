@@ -1,15 +1,18 @@
 /* ============================================================
  * kernel/arch/arm/proc/context_switch.S — bidirectional switch
  *
- * void context_switch(process_t *prev, process_t *next);
+ * void context_switch(thread_t *prev, thread_t *next);
  *
  * Saves prev's kernel state (callee-saved GPRs + lr pushed on
  * prev's SVC stack, plus banked SP_usr/LR_usr into prev->ctx)
  * then loads next's equivalents. Swaps TTBR0 and flushes TLB
  * between save and load.
  *
+ * The switched-to address space comes from next->proc->pgd_pa —
+ * threads borrow the page table of the process that owns them.
+ *
  * prev == NULL is a legal "no-save, load-only" form used by the
- * very first call from kmain to bootstrap processes[0]. In that
+ * very first call from kmain to bootstrap threads[0]. In that
  * case the epilogue still pops next's 9-word kernel-resume frame
  * and bx lr's to ret_from_first_entry (pre-baked into the
  * initial stack), which drains the 16-word IRQ-exit frame and
@@ -26,7 +29,8 @@
     .equ CTX_SP_SVC_OFFSET,     52
     .equ CTX_SP_USR_OFFSET,     64
     .equ CTX_LR_USR_OFFSET,     68
-    .equ PROC_PGD_PA_OFFSET,    88
+    .equ THREAD_PROC_OFFSET,    72
+    .equ PROC_PGD_PA_OFFSET,    12
 
     .section .text.ctxsw, "ax"
     .align  4
@@ -54,7 +58,13 @@ context_switch:
 
 .Lload_next:
     /* ----- swap address space ---------------------------- */
-    ldr     r2, [r1, #PROC_PGD_PA_OFFSET]
+    /* The page table belongs to the PROCESS, not the thread, so
+     * reach it through next->proc. Two threads of one process
+     * resolve to the same pgd_pa here — a future optimisation can
+     * turn that into an early-out that skips the TLB/I-cache
+     * flush entirely when prev and next share a process. */
+    ldr     r2, [r1, #THREAD_PROC_OFFSET]   @ r2 = next->proc
+    ldr     r2, [r2, #PROC_PGD_PA_OFFSET]   @ r2 = next->proc->pgd_pa
     orr     r2, r2, #0x4A                   @ TTBR0 walk attrs
     mcr     p15, 0, r2, c2, c0, 0
     mov     r2, #0
@@ -75,7 +85,7 @@ context_switch:
     /* Swap to next's kernel stack. From here on sp references
      * whatever context_switch left on next's SVC stack last
      * time it paused — either a real 9-word resume frame, or
-     * the pre-built one from process_build_initial_frame. */
+     * the pre-built one from thread_build_initial_frame. */
     ldr     sp, [r1, #CTX_SP_SVC_OFFSET]
 
     /* Pop r4-r11 + lr (9 words). For first-time entries, lr

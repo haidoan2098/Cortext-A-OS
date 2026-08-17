@@ -1,15 +1,18 @@
 /* ============================================================
- * kernel/proc/process.c — PCB table + static initialisation
+ * kernel/proc/process.c — PCB table + address space setup
  *
  * Builds 3 static process descriptors. After process_init_all(),
- * each PCB owns a per-process L1 table, a private 1 MB user PA
- * slot loaded with the process's binary, and a pre-built initial
- * kernel stack frame ready for context_switch to consume.
+ * each PCB owns a per-process L1 table and a private 1 MB user
+ * PA slot loaded with the process's binary. Threads (execution
+ * contexts, kernel stacks, initial frames) are built afterwards
+ * by thread_init_all() in kernel/proc/thread.c.
  *
  * Memory layout:
  *   proc 0 user PA = RAM_BASE + 0x200000
  *   proc 1 user PA = RAM_BASE + 0x300000
  *   proc 2 user PA = RAM_BASE + 0x400000
+ *
+ * Dependencies: mmu/pgtable, uart (debug log), platform.h
  * ============================================================ */
 
 #include <stdint.h>
@@ -26,16 +29,10 @@
  *   the whole array at 16 KB alignment via section .bss.proc_pgd
  *   (see kernel/linker/kernel_*.ld) — so proc_pgd[i] for every i
  *   is naturally 16 KB aligned because each row is 16 KB.
- *
- * proc_kstack: 8 KB kernel stack per process. 8-byte alignment
- *   is the ARM EABI requirement.
  * ----------------------------------------------------------- */
 static uint32_t proc_pgd[NUM_PROCESSES][PGD_ENTRIES]
     __attribute__((aligned(PGD_ALIGN)))
     __attribute__((section(".bss.proc_pgd")));
-
-static uint8_t proc_kstack[NUM_PROCESSES][KSTACK_SIZE]
-    __attribute__((aligned(8)));
 
 /* User-program images (embedded via .incbin in
  * kernel/arch/arm/proc/user_binaries.S). One entry per pid. */
@@ -55,14 +52,8 @@ static const user_image_t user_images[NUM_PROCESSES] = {
     { "shell",   _shell_img_start,   _shell_img_end   },
 };
 
-/* Trampoline landed on by context_switch's bx lr for first-time
- * entries. Defined in kernel/arch/arm/exception/exception_entry.S.
- * Pops the 16-word IRQ-exit frame and enters USR mode via rfefd. */
-extern void ret_from_first_entry(void);
-
-/* Public PCB array + current cursor */
-process_t  processes[NUM_PROCESSES];
-process_t *current;
+/* Public PCB array */
+process_t processes[NUM_PROCESSES];
 
 /* -----------------------------------------------------------
  * Minimal memcpy/memset — no libc in the kernel. Only used at
@@ -109,65 +100,7 @@ static void icache_sync(void *va, uint32_t len)
 }
 
 /* -----------------------------------------------------------
- * process_build_initial_frame — pre-construct two stacked frames
- * so that context_switch(NULL|prev, p) lands the process in USR
- * mode at user_entry using the same code path a preempted resume
- * uses.
- *
- * Stack layout (low→high; stack grows down, sp_svc points low):
- *
- *   [+0x00] r4   = 0         \
- *   [+0x04] r5   = 0          |
- *   [+0x08] r6   = 0          |
- *   [+0x0C] r7   = 0          |  9-word kernel-resume frame.
- *   [+0x10] r8   = 0          |  context_switch's epilogue does
- *   [+0x14] r9   = 0          |    ldmfd sp!, {r4-r11, lr}; bx lr
- *   [+0x18] r10  = 0          |  which pops these 9 words and
- *   [+0x1C) r11  = 0          |  transfers control to lr below.
- *   [+0x20] lr   = ret_from_first_entry  /
- *
- *   [+0x24] r0   = 0         \
- *     ...                     |
- *   [+0x54] r12  = 0          |  16-word IRQ-exit frame that
- *   [+0x58] svc_lr = 0        |  ret_from_first_entry drains via
- *   [+0x5C] pc   = user_entry |    ldmfd sp!, {r0-r12, lr}
- *   [+0x60] cpsr = 0x10       |    rfefd sp!
- *                             /
- *
- * sp_svc = start of the 9-word kernel-resume frame. Total 25
- * words (100 bytes) reserved at the top of the 8 KB kstack.
- * ----------------------------------------------------------- */
-#define KERNEL_RESUME_WORDS  9U     /* r4-r11 + lr */
-#define USER_EXIT_WORDS      16U    /* r0-r12 + svc_lr + pc + cpsr */
-#define INIT_STACK_WORDS     (KERNEL_RESUME_WORDS + USER_EXIT_WORDS)
-
-static void process_build_initial_frame(process_t *p)
-{
-    uint32_t top = (uint32_t)p->kstack_base + p->kstack_size;
-    uint32_t *frame = (uint32_t *)(top - INIT_STACK_WORDS * 4U);
-
-    /* Kernel-resume frame (indices 0..8). */
-    for (uint32_t i = 0; i < 8; i++)
-        frame[i] = 0;                              /* r4..r11 */
-    frame[8] = (uint32_t)&ret_from_first_entry;    /* lr */
-
-    /* IRQ-exit frame (indices 9..24). */
-    for (uint32_t i = 0; i < 13; i++)
-        frame[9 + i] = 0;                          /* r0..r12 */
-    frame[22] = 0;                                 /* svc_lr placeholder */
-    frame[23] = p->user_entry;                     /* pc */
-    frame[24] = 0x10U;                             /* cpsr — USR, I=0 F=0 */
-
-    /* ctx fields consumed by context_switch.S. */
-    p->ctx.sp_svc = (uint32_t)frame;
-    p->ctx.lr_svc = 0;
-    p->ctx.spsr   = 0x10U;          /* mirror of frame[24] — documentary */
-    p->ctx.sp_usr = USER_STACK_TOP;
-    p->ctx.lr_usr = 0;
-}
-
-/* -----------------------------------------------------------
- * process_init_all — build all NUM_PROCESSES PCBs
+ * process_init_all — build all NUM_PROCESSES address spaces
  * ----------------------------------------------------------- */
 void process_init_all(void)
 {
@@ -180,7 +113,6 @@ void process_init_all(void)
         kmemset(p, 0, sizeof(*p));
 
         p->pid         = i;
-        p->state       = TASK_READY;
         p->name        = img->name;
 
         p->pgd         = proc_pgd[i];
@@ -190,12 +122,9 @@ void process_init_all(void)
          * one PHYS_OFFSET below. */
         p->pgd_pa      = (uint32_t)proc_pgd[i] - PHYS_OFFSET;
 
-        p->kstack_base = proc_kstack[i];
-        p->kstack_size = KSTACK_SIZE;
-
         p->user_entry     = USER_VIRT_BASE;
-        p->user_stack_top = USER_STACK_TOP;
         p->user_phys_base = USER_PHYS_BASE + i * USER_PHYS_STRIDE;
+        p->img_size       = img_size;
 
         /* Copy this process's user image into its PA slot. Reach
          * the PA through the high-VA alias (PA + PHYS_OFFSET) so
@@ -210,39 +139,28 @@ void process_init_all(void)
         /* Build the per-process L1 table: kernel mirror + user
          * section at 0x40000000 → p->user_phys_base */
         pgtable_build_for_proc(p->pgd, p->user_phys_base);
-
-        /* Pre-build the first kernel stack frame */
-        process_build_initial_frame(p);
-
-        uart_printf("[PROC] pid=%u name=%s pgd=0x%08x "
-                    "kstack=0x%08x user_pa=0x%08x img=%u bytes\n",
-                    p->pid, p->name, (uint32_t)p->pgd,
-                    (uint32_t)p->kstack_base, p->user_phys_base,
-                    img_size);
     }
-
-    current = &processes[0];
 }
 
 /* -----------------------------------------------------------
- * process_dump — one-PCB debug print
+ * process_dump — one process and the threads it owns
+ *
+ * Prints the [PROC] line followed immediately by that process's
+ * [THRD] lines, so the ownership tree is visible. Nothing is
+ * logged during init itself: threads do not exist until
+ * thread_init_all() has run, and a flat "all processes then all
+ * threads" dump hides exactly the relationship this design is
+ * about.
  * ----------------------------------------------------------- */
 void process_dump(const process_t *p)
 {
-    static const char *const state_name[] = {
-        "READY", "RUNNING", "BLOCKED", "DEAD"
-    };
+    uart_printf("[PROC] %-7s pgd=0x%08x pa=0x%08x user_pa=0x%08x "
+                "img=%uB\n",
+                p->name, (uint32_t)p->pgd, p->pgd_pa,
+                p->user_phys_base, p->img_size);
 
-    uart_printf("  pid=%u name=%s state=%s\n",
-                p->pid, p->name, state_name[p->state]);
-    uart_printf("    pgd       = 0x%08x (pa 0x%08x)\n",
-                (uint32_t)p->pgd, p->pgd_pa);
-    uart_printf("    kstack    = 0x%08x..0x%08x\n",
-                (uint32_t)p->kstack_base,
-                (uint32_t)p->kstack_base + p->kstack_size);
-    uart_printf("    user VA   = 0x%08x entry, stack_top 0x%08x\n",
-                p->user_entry, p->user_stack_top);
-    uart_printf("    user PA   = 0x%08x\n", p->user_phys_base);
-    uart_printf("    ctx.sp    = 0x%08x spsr=0x%08x\n",
-                p->ctx.sp_svc, p->ctx.spsr);
+    for (uint32_t i = 0; i < THREADS_PER_PROC; i++) {
+        if (p->threads[i])
+            thread_dump(p->threads[i]);
+    }
 }

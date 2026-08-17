@@ -1,4 +1,4 @@
-# RingNova — Top-level Makefile
+# Cortex-A-OS — Top-level Makefile
 #
 # Usage:
 #   make                  → build for QEMU (default)
@@ -59,6 +59,7 @@ DRIVER_CORES := kernel/drivers/uart/uart_core.c \
 
 C_SRCS := kernel/main.c \
           kernel/proc/process.c \
+          kernel/proc/thread.c \
           kernel/sched/scheduler.c \
           kernel/syscall/syscall.c \
           kernel/arch/arm/exception/exception_handlers.c \

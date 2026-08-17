@@ -24,6 +24,7 @@
 #include "proc.h"
 #include "scheduler.h"
 #include "syscall.h"
+#include "thread.h"
 
 /* Negative return codes — kept small; user-side libc maps these
  * to errno-style values. */
@@ -74,7 +75,10 @@ static long sys_write(uint32_t fd, uint32_t buf_addr, uint32_t len,
 static long sys_getpid(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
 {
     (void)a0; (void)a1; (void)a2; (void)a3;
-    return current ? (long)current->pid : -1;
+    /* pid belongs to the address space, so it comes from ->proc.
+     * All threads of one process share it — a sys_gettid would be
+     * the syscall that distinguishes them. */
+    return current ? (long)current->proc->pid : -1;
 }
 
 /* sys_yield — hand the CPU over immediately. Flag is consumed by
@@ -86,15 +90,20 @@ static long sys_yield(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
     return 0;
 }
 
-/* sys_exit — mark the caller DEAD and force an immediate switch.
- * Scheduler skips DEAD processes, so the kernel never returns to
- * this process's saved user frame. */
+/* sys_exit — mark the CALLING THREAD DEAD and force an immediate
+ * switch. Scheduler skips DEAD threads, so the kernel never
+ * returns to this thread's saved user frame.
+ *
+ * NOTE: this is pthread_exit() semantics, not POSIX exit() —
+ * sibling threads of the same process keep running. With
+ * THREADS_PER_PROC == 1 the two are indistinguishable; step 2
+ * has to decide which one this syscall should mean. */
 static long sys_exit(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
 {
     (void)a0; (void)a1; (void)a2; (void)a3;
     if (current) {
-        uart_printf("[EXIT]  pid=%u name=%s\n",
-                    current->pid, current->name);
+        uart_printf("[EXIT] %s t%u\n",
+                    current->proc->name, current->index);
         current->state = TASK_DEAD;
     }
     scheduler_request_resched();
@@ -138,9 +147,15 @@ static long sys_read(uint32_t fd, uint32_t buf_addr, uint32_t len,
     return (long)n;
 }
 
-/* sys_ps(buf, size) — copy a text listing of every process into
+/* sys_ps(buf, size) — copy a text listing of every THREAD into
  * the user's buffer. Each line looks like "0 counter READY\n".
- * Returns number of bytes written, or E_FAULT for bad buf.       */
+ * Returns number of bytes written, or E_FAULT for bad buf.
+ *
+ * State lives on the thread now, so the listing walks threads[]
+ * and pulls the name from ->proc. Lines read "<name> t<idx>
+ * <state>" — the same identifier the boot log and every runtime
+ * message uses, so a thread is recognisable wherever it appears. */
+#define PS_NAME_W   7U      /* widest process name; keeps columns straight */
 static long sys_ps(uint32_t buf_addr, uint32_t size,
                    uint32_t unused0, uint32_t unused1)
 {
@@ -156,19 +171,33 @@ static long sys_ps(uint32_t buf_addr, uint32_t size,
     char    *out = (char *)buf_addr;
     uint32_t n   = 0;
 
-    for (uint32_t i = 0; i < NUM_PROCESSES; i++) {
-        process_t *p = &processes[i];
-        const char *st = p->state < 4 ? state_name[p->state] : "???";
+    for (uint32_t i = 0; i < NUM_THREADS; i++) {
+        thread_t   *t  = &threads[i];
+        process_t  *p  = t->proc;
+        const char *st = t->state < 4 ? state_name[t->state] : "???";
         const char *nm = p->name ? p->name : "?";
 
-        /* Compose "<pid> <name> <state>\n" by hand — no snprintf. */
-        if (n + 1 >= size) break;
-        out[n++] = '0' + (char)p->pid;
+        /* Compose "<name padded> t<idx>  <state>\n" by hand — no
+         * snprintf here. idx is a single digit at these table
+         * sizes; revisit if THREADS_PER_PROC exceeds 10. */
+        uint32_t namelen = 0;
+        for (const char *c = nm; *c && n + 1 < size; c++) {
+            out[n++] = *c;
+            namelen++;
+        }
+        while (namelen < PS_NAME_W && n + 1 < size) {
+            out[n++] = ' ';
+            namelen++;
+        }
+
         if (n + 1 >= size) break;
         out[n++] = ' ';
-
-        for (const char *c = nm; *c && n + 1 < size; c++)
-            out[n++] = *c;
+        if (n + 1 >= size) break;
+        out[n++] = 't';
+        if (n + 1 >= size) break;
+        out[n++] = '0' + (char)t->index;
+        if (n + 1 >= size) break;
+        out[n++] = ' ';
         if (n + 1 >= size) break;
         out[n++] = ' ';
 
@@ -181,9 +210,13 @@ static long sys_ps(uint32_t buf_addr, uint32_t size,
     return (long)n;
 }
 
-/* sys_kill(pid) — mark processes[pid] DEAD. Returns 0 on success,
- * E_BADCALL if pid out of range. Killing self is allowed and
- * triggers an immediate reschedule (scheduler skips DEAD).      */
+/* sys_kill(pid) — retire the whole process: every thread it owns
+ * is marked DEAD. Returns 0 on success, E_BADCALL if pid out of
+ * range. Killing self is allowed and triggers an immediate
+ * reschedule (scheduler skips DEAD).
+ *
+ * Killing a process means killing all its threads — an address
+ * space with no runnable thread is what "process is gone" means.  */
 static long sys_kill(uint32_t pid, uint32_t unused0,
                      uint32_t unused1, uint32_t unused2)
 {
@@ -192,18 +225,30 @@ static long sys_kill(uint32_t pid, uint32_t unused0,
     if (pid >= NUM_PROCESSES)
         return E_BADCALL;
 
-    process_t *p = &processes[pid];
-    if (p->state == TASK_DEAD)
+    process_t *p     = &processes[pid];
+    uint32_t   alive = 0;
+
+    for (uint32_t i = 0; i < THREADS_PER_PROC; i++) {
+        if (p->threads[i] && p->threads[i]->state != TASK_DEAD)
+            alive++;
+    }
+    if (alive == 0)
         return 0;                       /* already gone — idempotent */
 
-    uart_printf("[KILL] pid=%u name=%s killed by pid=%u via sys_kill\n",
-                p->pid, p->name, current ? current->pid : 99U);
+    uart_printf("[KILL] %s (%u threads) killed by %s t%u via sys_kill\n",
+                p->name, alive,
+                current ? current->proc->name : "?",
+                current ? current->index : 0U);
 
-    /* If the reader was sleeping on input, pull it off the wait
-     * slot before marking DEAD so the next UART IRQ doesn't try
-     * to wake a dead process. Handled implicitly via state check
-     * in scheduler_wake_reader — but clear via a quick reset. */
-    p->state = TASK_DEAD;
+    /* A thread sleeping on UART input stays in the wait queue —
+     * deliberately. scheduler_wake_reader() pops past non-BLOCKED
+     * entries, so a corpse is dropped when its turn comes instead
+     * of this path having to know about every queue in the kernel. */
+    for (uint32_t i = 0; i < THREADS_PER_PROC; i++) {
+        if (p->threads[i])
+            p->threads[i]->state = TASK_DEAD;
+    }
+
     scheduler_request_resched();
     return 0;
 }

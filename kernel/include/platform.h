@@ -23,9 +23,27 @@
 #define USER_REGION_SIZE    0x00100000U                       /* 1 MB */
 #define USER_STACK_TOP      (USER_VIRT_BASE + USER_REGION_SIZE)
 
-/* ---- Process table + kernel stack — sized at build time ---- */
+/* ---- Process / thread tables — sized at build time ----
+ *
+ * NUM_PROCESSES address spaces, each running THREADS_PER_PROC
+ * threads. Every thread gets its own KSTACK_SIZE kernel stack
+ * and its own USER_STACK_SIZE slice carved down from the top of
+ * the owning process's 1 MB user window:
+ *
+ *   thread index 0 → USER_STACK_TOP
+ *   thread index 1 → USER_STACK_TOP - USER_STACK_SIZE
+ *   ...
+ *
+ * The program image grows up from USER_VIRT_BASE, so
+ * THREADS_PER_PROC * USER_STACK_SIZE must stay well below
+ * USER_REGION_SIZE. Section-mapped 1 MB pages give no guard
+ * page — a stack overflow silently corrupts the neighbour.
+ */
 #define NUM_PROCESSES       3U
+#define THREADS_PER_PROC    1U
+#define NUM_THREADS         (NUM_PROCESSES * THREADS_PER_PROC)
 #define KSTACK_SIZE         8192U
+#define USER_STACK_SIZE     0x00010000U                       /* 64 KB */
 
 /* ---- Board wire-up — kernel/platform/<p>/board.c ----
  *

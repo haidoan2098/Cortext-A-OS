@@ -4,111 +4,61 @@
 /* ============================================================
  * proc.h — Process Control Block and process management API
  *
- * 3 static processes, each with:
+ * A process owns an ADDRESS SPACE and the resources tied to it;
+ * it does not run. Execution lives in thread.h. 3 static
+ * processes, each with:
  *   - its own 16 KB L1 page table (physical isolation real)
- *   - its own 8 KB kernel stack with a pre-built initial frame
- *   - its own 1 MB user physical slot
+ *   - its own 1 MB user physical slot holding the program image
  *   - all sharing the user VA window 0x40000000 (different PA)
+ *   - THREADS_PER_PROC threads pointing back at it
+ *
+ * Dependencies: thread.h (thread_t), board.h, platform.h
  * ============================================================ */
 
 #include <stdint.h>
 #include <stddef.h>
 #include "board.h"
-
-typedef enum {
-    TASK_READY = 0,
-    TASK_RUNNING,
-    TASK_BLOCKED,
-    TASK_DEAD
-} task_state_t;
-
-/* Saved CPU context. The actual initial frame on the kernel
- * stack (built by process_build_initial_frame) is what
- * context_switch.S consumes; this struct just parks the banked
- * registers and pointer state that cannot live on the stack. */
-typedef struct {
-    uint32_t r0, r1, r2, r3, r4, r5, r6, r7;
-    uint32_t r8, r9, r10, r11, r12;
-    uint32_t sp_svc;        /* kernel SP — points at initial frame */
-    uint32_t lr_svc;
-    uint32_t spsr;          /* CPSR to restore on return to user   */
-    uint32_t sp_usr;        /* banked USR mode SP                  */
-    uint32_t lr_usr;
-} proc_context_t;
+#include "thread.h"
 
 typedef struct process {
-    proc_context_t  ctx;            /* offset 0 — assembly-friendly */
-
     uint32_t        pid;
-    task_state_t    state;
     const char     *name;
 
     uint32_t       *pgd;            /* VA of this process's L1 table   */
     uint32_t        pgd_pa;         /* PA written into TTBR0 on switch */
 
-    void           *kstack_base;    /* low addr of the 8 KB region     */
-    uint32_t        kstack_size;
-
     uint32_t        user_entry;     /* = USER_VIRT_BASE                */
-    uint32_t        user_stack_top; /* = USER_VIRT_BASE + 1 MB         */
     uint32_t        user_phys_base; /* per-process physical slot       */
+
+    /* Threads belonging to this address space. Filled in by
+     * thread_init_all(); threads[0] is the main thread. */
+    thread_t       *threads[THREADS_PER_PROC];
+
+    /* Bytes of program image copied into the user slot. Kept only
+     * so the boot dump can report it after init has finished.
+     * Appended last on purpose — PROC_PGD_PA_OFFSET must not move. */
+    uint32_t        img_size;
 } process_t;
 
-/* Public table + cursor — populated by process_init_all() */
-extern process_t  processes[NUM_PROCESSES];
-extern process_t *current;
+/* Public table — populated by process_init_all() */
+extern process_t processes[NUM_PROCESSES];
 
-/* Construct all NUM_PROCESSES PCBs:
- *   - allocate per-process L1 table + kernel stack (static BSS)
- *   - copy user_stub into each process's user PA slot
- *   - populate L1 table via pgtable_build_for_proc
- *   - pre-build initial kernel stack frame for user-mode entry
- *   - set current = &processes[0]
- * Safe to call once after mmu_init(). */
+/* Construct all NUM_PROCESSES address spaces:
+ *   - allocate per-process L1 table (static BSS)
+ *   - copy the program image into the process's user PA slot
+ *   - populate the L1 table via pgtable_build_for_proc
+ * Safe to call once after mmu_init(). Threads are created
+ * separately by thread_init_all(), which must run after this. */
 void process_init_all(void);
 
 /* Pretty-print one PCB over UART. Debug only. */
 void process_dump(const process_t *p);
 
-/* context_switch — implemented in kernel/arch/arm/proc/context_switch.S.
- *
- * Saves prev's kernel state onto prev's SVC stack (callee-saved
- * GPRs + lr + banked SP_usr/LR_usr) and loads the equivalent for
- * next, then returns via bx lr — landing in whatever kernel code
- * next was last executing when it yielded the CPU.
- *
- * prev == NULL means "first-time entry" — no save side; caller
- * (kmain) never needs to return. next's initial kernel stack is
- * pre-built so the bx lr at the epilogue jumps to
- * ret_from_first_entry, which pops the 16-word IRQ-exit frame
- * and enters USR mode. */
-void context_switch(struct process *prev, struct process *next);
+/* Offset used by context_switch.S to reach the page table base
+ * through thread->proc. _Static_assert guards layout drift. */
+#define PROC_PGD_PA_OFFSET      12
 
-/* Bootstrap helper: kick off the first process from kmain. Never
- * returns. Equivalent to context_switch(NULL, &processes[0]). */
-static inline void __attribute__((noreturn))
-process_first_run(struct process *first)
-{
-    context_switch((void *)0, first);
-    for (;;) { /* unreachable */ }
-}
-
-/* Struct offsets used by context_switch.S — must stay in sync.
- * _Static_assert below guards accidental layout drift. */
-#define CTX_SP_SVC_OFFSET       52
-#define CTX_LR_SVC_OFFSET       56
-#define CTX_SPSR_OFFSET         60
-#define CTX_SP_USR_OFFSET       64
-#define CTX_LR_USR_OFFSET       68
-#define PROC_PGD_PA_OFFSET      88
-
-_Static_assert(offsetof(proc_context_t, sp_svc) == CTX_SP_SVC_OFFSET,
-               "ctx.sp_svc offset drifted");
-_Static_assert(offsetof(proc_context_t, sp_usr) == CTX_SP_USR_OFFSET,
-               "ctx.sp_usr offset drifted");
-_Static_assert(offsetof(proc_context_t, lr_usr) == CTX_LR_USR_OFFSET,
-               "ctx.lr_usr offset drifted");
-_Static_assert(offsetof(process_t, pgd_pa)    == PROC_PGD_PA_OFFSET,
+_Static_assert(offsetof(process_t, pgd_pa) == PROC_PGD_PA_OFFSET,
                "process.pgd_pa offset drifted");
 
 #endif /* KERNEL_PROC_H */

@@ -1,13 +1,18 @@
 /* ============================================================
  * kernel/sched/scheduler.c — Round-robin preemptive scheduler
  *
- * One time slice = one timer tick (10 ms). scheduler_tick()
- * flips a flag from the IRQ context; schedule() at the tail of
- * handle_irq walks the PCB ring and swaps to the next runnable
- * process via context_switch(). Processes marked BLOCKED or
- * DEAD are skipped.
+ * The scheduling unit is the THREAD, not the process. One time
+ * slice = one timer tick (10 ms). scheduler_tick() flips a flag
+ * from the IRQ context; schedule() at the tail of handle_irq
+ * walks the TCB ring and swaps to the next runnable thread via
+ * context_switch(). Threads marked BLOCKED or DEAD are skipped.
  *
- * Dependencies: proc.h (PCB + context_switch), uart (debug log)
+ * Because the ring walks threads, two threads of one process are
+ * scheduled independently — and context_switch() notices they
+ * share an address space.
+ *
+ * Dependencies: thread.h (TCB + context_switch), proc.h (names
+ *               for the debug log), uart
  * ============================================================ */
 
 #include <stdint.h>
@@ -15,6 +20,7 @@
 #include "platform.h"
 #include "proc.h"
 #include "scheduler.h"
+#include "thread.h"
 
 /* Raised by the timer IRQ, cleared by schedule(). No locking
  * needed — single-core, accessed only from SVC mode with IRQ
@@ -38,16 +44,16 @@ void scheduler_request_resched(void)
 }
 
 /* -----------------------------------------------------------
- * BLOCKED state — only one process can sleep on UART input at
- * a time (shell). One pointer slot is enough; multi-reader
- * support would require a wait queue.
+ * BLOCKED state — only one thread can sleep on UART input at
+ * a time (the shell's main thread). One pointer slot is enough;
+ * multi-reader support would require a wait queue.
  *
- * wake_hint: just-woken process to prefer on the next schedule()
+ * wake_hint: just-woken thread to prefer on the next schedule()
  * so I/O-bound readers aren't stuck behind a CPU hog under plain
  * round-robin. Consumed once, then fall back to the ring walk.
  * ----------------------------------------------------------- */
-static process_t *blocked_reader;
-static process_t *wake_hint;
+static thread_t *blocked_reader;
+static thread_t *wake_hint;
 
 void scheduler_block_on_input(void)
 {
@@ -64,20 +70,20 @@ void scheduler_block_on_input(void)
 
 void scheduler_wake_reader(void)
 {
-    process_t *p = blocked_reader;
-    if (p && p->state == TASK_BLOCKED) {
-        p->state = TASK_READY;
-        blocked_reader = (process_t *)0;
-        wake_hint = p;
+    thread_t *t = blocked_reader;
+    if (t && t->state == TASK_BLOCKED) {
+        t->state = TASK_READY;
+        blocked_reader = (thread_t *)0;
+        wake_hint = t;
         need_reschedule = 1;
     }
 }
 
-static void perform_switch(process_t *prev, process_t *cand)
+static void perform_switch(thread_t *prev, thread_t *cand)
 {
     switch_count++;
 
-    /* Only demote still-running processes back to READY — do
+    /* Only demote still-running threads back to READY — do
      * not resurrect a DEAD or BLOCKED prev. */
     if (prev->state == TASK_RUNNING)
         prev->state = TASK_READY;
@@ -93,24 +99,24 @@ void schedule(void)
         return;
     need_reschedule = 0;
 
-    process_t *prev = current;
+    thread_t *prev = current;
 
-    /* Wake-up preemption: a process that just came out of BLOCKED
+    /* Wake-up preemption: a thread that just came out of BLOCKED
      * gets the CPU ahead of the round-robin sweep. Keeps interactive
      * readers snappy when CPU-bound siblings are also READY. */
-    process_t *hint = wake_hint;
-    wake_hint = (process_t *)0;
+    thread_t *hint = wake_hint;
+    wake_hint = (thread_t *)0;
     if (hint && hint != prev
         && (hint->state == TASK_READY || hint->state == TASK_RUNNING)) {
         perform_switch(prev, hint);
         return;
     }
 
-    uint32_t start = (prev->pid + 1U) % NUM_PROCESSES;
+    uint32_t start = (prev->tid + 1U) % NUM_THREADS;
 
-    for (uint32_t i = 0; i < NUM_PROCESSES; i++) {
-        uint32_t idx = (start + i) % NUM_PROCESSES;
-        process_t *cand = &processes[idx];
+    for (uint32_t i = 0; i < NUM_THREADS; i++) {
+        uint32_t idx = (start + i) % NUM_THREADS;
+        thread_t *cand = &threads[idx];
 
         if (cand == prev)
             continue;
@@ -121,5 +127,5 @@ void schedule(void)
         return;
     }
 
-    /* No other runnable process — keep the current one. */
+    /* No other runnable thread — keep the current one. */
 }

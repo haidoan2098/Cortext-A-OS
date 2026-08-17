@@ -55,7 +55,7 @@ void kmain(void)
 
     uart_printf("\n");
     uart_printf("================================================\n");
-    uart_printf("  RingNova — ARMv7-A bare-metal kernel\n");
+    uart_printf("  Cortex-A-OS — ARMv7-A bare-metal kernel\n");
     uart_printf("  Built %s %s\n", __DATE__, __TIME__);
     uart_printf("================================================\n");
 
@@ -89,14 +89,22 @@ void kmain(void)
     irq_register(IRQ_UART0, uart_rx_irq);   /* wakes sys_read */
     irq_enable(IRQ_UART0);
 
+    /* Address spaces first (page tables + program images), then
+     * the threads that run inside them — thread_init_all() reads
+     * each process's user_entry, so the order matters. */
     process_init_all();
+    thread_init_all();
+
+    /* Dump the process→thread tree once both halves exist. */
+    for (uint32_t i = 0; i < NUM_PROCESSES; i++)
+        process_dump(&processes[i]);
 
     /* Kernel has fully migrated off PA — tear down the identity
      * map so any stray PA dereference after this point faults
      * immediately. */
     mmu_drop_identity();
 
-    /* PCBs stable, VA world tidy — arm scheduler_tick so each
+    /* TCBs stable, VA world tidy — arm scheduler_tick so each
      * timer IRQ flips need_reschedule. Ticks before this point
      * bumped tick_count but schedule() stayed a no-op. */
     timer_set_handler(scheduler_tick);
@@ -105,16 +113,16 @@ void kmain(void)
      * rfefd restores USR CPSR with I=0 atomically when the first
      * process enters user mode; every exception thereafter re-enters
      * with I=1. Enabling IRQs while kmain is still running would let
-     * a timer preemption save kmain's SVC state into processes[0].ctx
-     * and clobber the initial frame built by process_build_initial_frame. */
+     * a timer preemption save kmain's SVC state into threads[0].ctx
+     * and clobber the initial frame built by thread_build_initial_frame. */
     uart_printf("[BOOT] boot complete — entering user mode pid=%u "
                 "(USR @ 0x%08x)\n",
                 processes[0].pid, processes[0].user_entry);
 
-    /* Bootstrap the first process via the shared context_switch
+    /* Bootstrap the first thread via the shared context_switch
      * path (prev=NULL: no save side, load-only). Once IRQ-driven
      * preemption is wired up, every subsequent switch takes the
      * same route with both pointers non-null. */
-    process_first_run(&processes[0]);
+    thread_first_run(&threads[0]);
     /* noreturn — code below is unreachable */
 }
