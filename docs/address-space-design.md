@@ -134,16 +134,24 @@ Resulting invariant:
 | Platform MMIO | same kernel-only device map | same kernel-only device map | same kernel-only device map |
 | RAM identity PA | not mapped | not mapped | not mapped |
 
-Address-space switch in `context_switch(prev, next)`:
+Address-space switch in `context_switch(thread_t *prev, thread_t *next)`:
 
 1. Save `prev` callee-saved registers on its SVC stack.
 2. Save banked `SP_usr` and `LR_usr`.
-3. Write `TTBR0 = next->pgd_pa | 0x4A`.
-4. Flush `TLBIALL` and `ICIALLU`, then `DSB; ISB`.
-5. Restore `next` banked user registers and SVC stack.
+3. Compare `prev->proc` and `next->proc`. If equal (two threads of the same
+   process, sharing one page table), skip straight to step 6 — steps 4-5
+   have nothing to reload.
+4. Write `TTBR0 = next->proc->pgd_pa | 0x4A`.
+5. Flush `TLBIALL` and `ICIALLU`, then `DSB; ISB`.
+6. Restore `next` banked user registers and SVC stack.
 
 The I-cache invalidate is required because every process executes at the same
-user VA `0x40000000`, but that VA maps to a different PA per process.
+user VA `0x40000000`, but that VA maps to a different PA per process. The
+same-process skip (step 3) is the concrete reason a thread switch is cheaper
+than a process switch: not because threads are inherently lighter, but
+because one full TLB + I-cache flush is avoided. `prev == NULL` (first-time
+entry) always takes the reprogram path — TTBR0 still holds `boot_pgd` at
+that point.
 
 ---
 
@@ -372,10 +380,11 @@ This matches the current fixed user address space: a single 1 MB section at
 kernel. This is the project's simplified version of `copy_from_user()` and
 `copy_to_user()`.
 
-> **Blocking read constraint:** `sys_read` uses `scheduler_block_on_input()` which
-> has only a single `blocked_reader` slot. Only one process can block on UART I/O
-> at a time — currently the shell is the sole consumer. Extending to multiple
-> readers would require a wait queue.
+> **Blocking read:** `sys_read` uses `scheduler_block_on_input()`, which enqueues
+> the calling thread into a FIFO wait ring (`uart_waitq[NUM_THREADS]`). Any
+> number of threads may block on UART input concurrently; each arriving byte
+> wakes exactly one, in the order they blocked. A thread killed while queued
+> is skipped rather than allowed to swallow a wakeup meant for a live reader.
 
 ---
 
@@ -387,7 +396,7 @@ Current deliberate limits:
 - No demand paging, page allocator, `fork`, or `exec`.
 - No W^X separation for kernel or user sections.
 - No per-thread stack guard inside the user 1 MB section.
-- Static process count: `NUM_PROCESSES = 3`.
+- Static process count: `NUM_PROCESSES = 3`, `THREADS_PER_PROC = 2` (6 threads total).
 
 Invariants that must stay true:
 
