@@ -1,8 +1,8 @@
 # Cortex-A-OS
 
-> Bare-metal ARMv7-A kernel written from scratch. 3 user processes scheduled
-> preemptively through an interactive shell — ~5000 lines of C + assembly,
-> no framework.
+> Bare-metal ARMv7-A kernel written from scratch. 3 user processes, 2 threads
+> each, scheduled preemptively through an interactive shell — ~5000 lines of
+> C + assembly, no framework.
 
 <div align="center">
 
@@ -86,7 +86,7 @@ At the `shell>` prompt:
 | Command       | Effect                                                                |
 | ------------- | --------------------------------------------------------------------- |
 | `help`        | List 6 commands                                                       |
-| `ps`          | Show pid + state of 3 processes                                       |
+| `ps`          | Show name + state of 6 threads (3 processes × 2 threads each)         |
 | `kill <pid>`  | Mark process DEAD; scheduler skips                                    |
 | `echo <text>` | Print back                                                            |
 | `clear`       | ANSI clear screen                                                     |
@@ -128,23 +128,12 @@ links at VA `0x40000000`, kernel links at `KERNEL_VIRT_BASE = 0xC0000000`
 8 KB kernel stack, and 1 MB user physical slot — process A crashing cannot
 corrupt B or C.
 
-### Core topics (each has its own chapter)
+### Core topics
 
-| Chapter                                          | Topic                                                                    |
-| ------------------------------------------------ | ------------------------------------------------------------------------ |
-| [00 Foundation](docs/tech_docs/00_foundation.md) | Pre-OS knowledge: ARM modes, banked regs, exception levels               |
-| [01 Boot](docs/tech_docs/01_boot.md)             | start.S, dual MEMORY linker (VMA/LMA split), VA trampoline               |
-| [02 Exceptions](docs/tech_docs/02_exceptions.md) | Vector table, VBAR, abort/SVC/IRQ entry                                  |
-| [03 MMU](docs/tech_docs/03_mmu.md)               | 1 MB section mapping, identity bootstrap + drop, high-VA alias           |
-| [04 Interrupts](docs/tech_docs/04_interrupts.md) | GIC v1, timer driver, IRQ dispatch                                       |
-| [05 Process](docs/tech_docs/05_process.md)       | 3 static PCBs, per-process L1 + kernel stack, initial frame              |
-| [06 Scheduler](docs/tech_docs/06_scheduler.md)   | Bidirectional context_switch, round-robin, BLOCKED state                 |
-| [07 Syscall](docs/tech_docs/07_syscall.md)       | r7 + r0-r3 ABI, dispatch table, user-pointer validation, fault isolation |
-| [08 Userspace](docs/tech_docs/08_userspace.md)   | crt0, libc, per-app build, .incbin bundle, cache sync                    |
-| [09 Shell](docs/tech_docs/09_shell.md)           | UART RX IRQ + ring buffer, sys_read blocking, command parser             |
-
+Full technical design — boot, MMU, exceptions, process/thread model,
+scheduler, syscall ABI, userspace, shell — is written up in
+[docs/os-design.md](docs/os-design.md).
 Memory layout: [docs/address-space-design.md](docs/address-space-design.md).
-Project description: [docs/project-description.md](docs/project-description.md).
 
 ### Toolchain
 
@@ -260,7 +249,7 @@ Sau khi boot, gõ vào prompt `shell>`:
 | Lệnh          | Tác dụng                                                            |
 | ------------- | ------------------------------------------------------------------- |
 | `help`        | List 6 lệnh                                                         |
-| `ps`          | Show pid + state của 3 process                                      |
+| `ps`          | Show name + state của 6 thread (3 process × 2 thread mỗi cái)        |
 | `kill <pid>`  | Mark process DEAD, scheduler skip                                   |
 | `echo <text>` | Print lại                                                           |
 | `clear`       | ANSI clear screen                                                   |
@@ -301,23 +290,12 @@ drivers; không đụng core. User link tại VA `0x40000000`, kernel link tại
 page table 16 KB + kernel stack 8 KB + user PA slot 1 MB riêng — process A
 crash không corrupt B/C.
 
-### Cốt lõi (mỗi mục có chapter doc riêng)
+### Cốt lõi
 
-| Chapter                                          | Topic                                                                  |
-| ------------------------------------------------ | ---------------------------------------------------------------------- |
-| [00 Foundation](docs/tech_docs/00_foundation.md) | Pre-OS knowledge: ARM modes, banked regs, exception levels             |
-| [01 Boot](docs/tech_docs/01_boot.md)             | start.S, dual MEMORY linker (VMA/LMA split), trampoline VA             |
-| [02 Exceptions](docs/tech_docs/02_exceptions.md) | Vector table, VBAR, abort/SVC/IRQ entries                              |
-| [03 MMU](docs/tech_docs/03_mmu.md)               | 1 MB section mapping, identity bootstrap + drop, high VA alias         |
-| [04 Interrupts](docs/tech_docs/04_interrupts.md) | GIC v1, timer driver, IRQ dispatch                                     |
-| [05 Process](docs/tech_docs/05_process.md)       | 3 PCB static, per-process L1 + kernel stack, initial frame             |
-| [06 Scheduler](docs/tech_docs/06_scheduler.md)   | Bidirectional context_switch, round-robin, BLOCKED state               |
-| [07 Syscall](docs/tech_docs/07_syscall.md)       | r7+r0-r3 ABI, dispatch table, user pointer validation, fault isolation |
-| [08 Userspace](docs/tech_docs/08_userspace.md)   | crt0, libc, per-app build, .incbin bundle, cache sync                  |
-| [09 Shell](docs/tech_docs/09_shell.md)           | UART RX IRQ + ring buffer, sys_read blocking, command parser           |
-
+Thiết kế kỹ thuật đầy đủ — boot, MMU, exception, process/thread model,
+scheduler, syscall ABI, userspace, shell — nằm trong
+[docs/os-design.md](docs/os-design.md).
 Memory layout chi tiết: [docs/address-space-design.md](docs/address-space-design.md).
-Mô tả dự án: [docs/project-description.md](docs/project-description.md).
 
 ### Toolchain
 
